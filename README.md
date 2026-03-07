@@ -9,20 +9,26 @@ A Kubernetes operator written in **Go** that manages **Agent** custom resources 
 ```
 ┌─────────────┐   REST :8082   ┌──────────────────────────┐
 │   Client    │ ◄────────────► │   REST API (Gin)          │
-└─────────────┘                │   internal/rest/          │
-                               └────────────┬─────────────┘
-                                            │ controller-runtime client
-                               ┌────────────▼─────────────┐
-                               │   Agent CRD               │
+│   (A2A/CLI) │                │   internal/rest/          │
+└──────┬──────┘                └────────────┬─────────────┘
+       │  POST /keepalive                   │ controller-runtime client
+       │  (wake + idle reset)  ┌────────────▼─────────────┐
+       └──────────────────────►│   Agent CRD               │
                                │   orchestrator.dev/v1alpha1│
                                └────────────┬─────────────┘
                                             │ reconcile loop
                           ┌─────────────────┴─────────────────┐
                           │                                   │
                ┌──────────▼──────────┐           ┌───────────▼──────────┐
-               │   Pod  (1 per Agent)│           │  ClusterIP Service   │
-               │                     │           │  (optional, per Agent)│
-               └─────────────────────┘           └──────────────────────┘
+               │   Pod  (1 per Agent)│◄──────────►│  ClusterIP Service   │
+               │                     │  direct    │  (optional, per Agent)│
+               └─────────────────────┘  A2A traffic└──────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│  Idle Watcher (goroutine)   internal/idle/watcher.go         │
+│  Polls all Agents every --idle-check-interval seconds.       │
+│  Sets spec.paused=true when inactivity > effectiveTimeout.   │
+└──────────────────────────────────────────────────────────────┘
 Sidecar services:
   :8080  Prometheus metrics
   :8081  Health / readiness probes
@@ -30,9 +36,10 @@ Sidecar services:
 
 | Component | Description |
 |-----------|-------------|
-| **Agent CRD** | Declares desired state (image, env, resources, restart policy, servicePort…) |
+| **Agent CRD** | Declares desired state (image, env, resources, restart policy, servicePort, idleTimeout…) |
 | **Controller** | Reconcile loop: creates/deletes/restarts Pods and Services from CR; handles finalizer and self-healing |
-| **REST API** | Gin HTTP server on `:8082` — CRUD agents, patch env, stream logs, manage cache, list service URLs, view history |
+| **REST API** | Gin HTTP server on `:8082` — CRUD agents, patch env, stream logs, manage cache, list service URLs, view history, keepalive |
+| **Idle Watcher** | Background goroutine: pauses agents that exceeded their idle timeout; activity tracked via cache |
 | **Cache** | Thread-safe, per-agent, TTL key-value store (in-process memory) |
 | **Lifecycle History** | Append-only event log in `status.history`; survives resurrections; capped at 100 entries |
 | **Helm chart** | Deployment, Service, ServiceAccount, namespaced Role/RoleBinding, CRD |
@@ -76,7 +83,12 @@ make dev
 This single target:
 1. Applies the `Agent` CRD to the cluster.
 2. Runs `go mod tidy -e` (resolves dependencies, tolerates unreachable test-only deps).
-3. Starts the controller manager + REST API.
+3. Starts the controller manager + REST API + idle watcher.
+
+For testing idle auto-stop with a short timeout:
+```bash
+go run ./cmd/main.go --debug=true --idle-timeout-default=30 --idle-check-interval=10
+```
 
 Ports after startup:
 
@@ -215,6 +227,7 @@ Full body schema:
 | `selfHealingDisabled` | bool | | `true` = disable automatic resurrection. **Default: false (self-healing ON)** |
 | `servicePort` | int (1-65535) | | When non-zero the controller creates a **ClusterIP Service** on this port. Set to `0` or omit to disable. |
 | `serviceProtocol` | `TCP`\|`UDP`\|`SCTP` | | Protocol for the Service port. Default: `TCP` |
+| `idleTimeout` | int (seconds) | | Auto-pause agent after N seconds of inactivity. `0` = use global `--idle-timeout-default` (or disabled if that is also `0`). |
 
 **Response:** `201 Created`
 
@@ -280,6 +293,68 @@ Start (resume) a paused agent. Sets `spec.paused=false` and forces pod recreatio
 ```bash
 curl -X POST http://localhost:8082/api/v1/agents/my-agent/start
 # {"status":"ok","data":{"started":true}}
+```
+
+---
+
+### Idle Auto-Stop & Keepalive
+
+The orchestrator can automatically pause (stop) agents that have been inactive for a configurable period. This is useful with A2A agents that should not consume cluster resources while idle.
+
+**How it works:**
+1. Every REST API call on a named agent (`/:name/*`) resets a per-agent activity timestamp stored in the in-memory cache.
+2. A background **Idle Watcher** goroutine polls all Agents every `--idle-check-interval` seconds.
+3. If `now − lastActivity > effectiveTimeout`, the watcher sets `spec.paused=true` (Pod is deleted).
+4. The **effective timeout** per agent is: `spec.idleTimeout` if `> 0`, otherwise `--idle-timeout-default`; `0` disables idle tracking.
+
+**A2A session pattern:**
+- Before initiating conversation: call `POST /keepalive` → orchestrator wakes the agent and returns `svcUrl`.
+- Communicate directly with the agent via the ClusterIP Service (`svcUrl`) — orchestrator is **not** in the data path.
+- Periodically call `POST /keepalive?wait=0` during the session (every `idleTimeout/2` seconds) to prevent auto-stop.
+- After the session ends: do nothing — agent stops automatically after `idleTimeout`.
+
+#### CLI flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--idle-timeout-default` | `0` | Global idle timeout in seconds. `0` = disabled globally (per-agent `spec.idleTimeout` still works). |
+| `--idle-check-interval` | `30` | How often (seconds) the watcher scans all agents. |
+
+#### `POST /api/v1/agents/:name/keepalive`
+Resets the idle timer. If the agent is paused, wakes it and waits up to `?wait` seconds for `Running` phase.
+Returns current status and the ClusterIP service URL for direct A2A communication.
+
+| Query param | Type | Default | Description |
+|-------------|------|---------|-------------|
+| `wait` | int (0-120) | `30` | Max seconds to wait for `Running`. Use `0` to only reset the timer without blocking. |
+
+```bash
+# Wake agent and wait up to 30s for Running
+curl -X POST "http://localhost:8082/api/v1/agents/my-agent/keepalive?wait=30"
+```
+```json
+{
+  "status": "ok",
+  "data": {
+    "status":  "running",
+    "phase":   "Running",
+    "svcUrl":  "http://my-agent.default.svc.cluster.local:8080",
+    "elapsed": "4.2s"
+  }
+}
+```
+
+Possible `status` values:
+
+| Value | Meaning |
+|-------|---------|
+| `running` | Agent is Running; `svcUrl` is ready for use |
+| `starting` | Agent was woken but did not reach Running within `wait` seconds — retry |
+| `accepted` | `wait=0` was used; wake command sent but no polling performed |
+
+```bash
+# Only reset idle timer, don't wait (fire-and-forget during active A2A session)
+curl -X POST "http://localhost:8082/api/v1/agents/my-agent/keepalive?wait=0"
 ```
 
 ---
@@ -526,6 +601,7 @@ spec:
   image: python:3.12-slim
   restartPolicy: Always
   servicePort: 8080          # creates a ClusterIP Service named 'data-processor'
+  idleTimeout: 300           # pause after 5 minutes of inactivity (0 = use global default)
   env:
     - name: QUEUE_URL
       value: "amqp://rabbitmq:5672"
@@ -605,6 +681,8 @@ K8SAgentOrchestrator/
 │   │   └── cache.go             # In-memory TTL cache
 │   ├── controller/
 │   │   └── agent_controller.go  # Reconcile loop
+│   ├── idle/
+│   │   └── watcher.go           # Idle auto-stop goroutine
 │   └── rest/
 │       ├── server.go            # Gin server + route registration
 │       ├── handlers.go          # All HTTP handlers
