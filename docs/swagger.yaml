@@ -41,6 +41,9 @@ definitions:
         type: object
       name:
         type: string
+      paused:
+        description: Paused prevents pod creation when true.
+        type: boolean
       podAnnotations:
         additionalProperties:
           type: string
@@ -53,6 +56,11 @@ definitions:
         $ref: '#/definitions/v1.ResourceRequirements'
       restartPolicy:
         type: string
+      selfHealingDisabled:
+        description: |-
+          SelfHealingDisabled disables automatic resurrection of this Agent CR when deleted externally.
+          Default false means self-healing is ON.
+        type: boolean
       serviceAccountName:
         type: string
     required:
@@ -432,8 +440,9 @@ paths:
       - agents
   /api/v1/namespaces/{namespace}/agents/{name}:
     delete:
-      description: Deletes the Agent CR; the controller removes the Pod via finalizer.
-        Also clears the in-memory cache.
+      description: Permanently deletes the Agent CR and its Pod. Self-healing is disabled
+        before deletion so the agent is not resurrected. Also clears the in-memory
+        cache.
       parameters:
       - description: Kubernetes namespace
         in: path
@@ -716,6 +725,82 @@ paths:
       summary: Set cache field
       tags:
       - cache
+  /api/v1/namespaces/{namespace}/agents/{name}/disable-healing:
+    post:
+      description: Sets spec.selfHealingDisabled=true. The Agent CR will NOT be recreated
+        automatically when deleted externally.
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'selfHealingDisabled: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Disable self-healing
+      tags:
+      - lifecycle
+  /api/v1/namespaces/{namespace}/agents/{name}/enable-healing:
+    post:
+      description: Sets spec.selfHealingDisabled=false. The Agent CR will be automatically
+        recreated when deleted externally (this is the default behaviour).
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'selfHealingDisabled: false'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Enable self-healing
+      tags:
+      - lifecycle
   /api/v1/namespaces/{namespace}/agents/{name}/env:
     get:
       description: Returns the current list of environment variables for the agent
@@ -993,8 +1078,8 @@ paths:
       - lifecycle
   /api/v1/namespaces/{namespace}/agents/{name}/start:
     post:
-      description: 'Resumes a stopped agent: resets restartPolicy=Always and forces
-        pod recreation'
+      description: 'Resumes a paused agent: sets spec.paused=false and forces pod
+        recreation'
       parameters:
       - description: Kubernetes namespace
         in: path
@@ -1031,7 +1116,8 @@ paths:
       - lifecycle
   /api/v1/namespaces/{namespace}/agents/{name}/stop:
     post:
-      description: Sets restartPolicy=Never so the pod is not restarted after it exits
+      description: 'Pauses the agent: sets spec.paused=true, which causes the controller
+        to delete the Pod and stop reconciling'
       parameters:
       - description: Kubernetes namespace
         in: path

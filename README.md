@@ -40,8 +40,9 @@ Sidecar services:
 | `Pending` | CR created, Pod not yet scheduled |
 | `Running` | Pod is running |
 | `Failed` | Pod exited with error |
-| `Stopped` | `RestartPolicy=Never`, pod completed / not re-created |
+| `Stopped` | `spec.paused=true`, pod deleted and not re-created |
 | `Updating` | Spec change detected, pod being replaced |
+| `Restoring` | Agent CR deleted externally, self-healing resurrection in progress |
 
 ---
 
@@ -184,6 +185,8 @@ Full body schema:
 | `podAnnotations` | `map[string]string` | | Extra annotations on the Pod |
 | `labels` | `map[string]string` | | Labels on the Agent CR |
 | `annotations` | `map[string]string` | | Annotations on the Agent CR |
+| `paused` | bool | | `true` = delete Pod and halt reconciliation (stop the agent) |
+| `selfHealingDisabled` | bool | | `true` = disable automatic resurrection. **Default: false (self-healing ON)** |
 
 **Response:** `201 Created`
 
@@ -236,8 +239,7 @@ curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/res
 ---
 
 #### `POST /api/v1/namespaces/:namespace/agents/:name/stop`
-Stop the agent: sets `restartPolicy=Never` and records `orchestrator.dev/stopped-at`.  
-The pod finishes and is not restarted.
+Stop the agent: sets `spec.paused=true`. The controller deletes the Pod and does not recreate it until `/start` is called.
 ```bash
 curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/stop
 # {"status":"ok","data":{"stopped":true}}
@@ -246,11 +248,40 @@ curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/sto
 ---
 
 #### `POST /api/v1/namespaces/:namespace/agents/:name/start`
-Start (resume) a stopped agent. Resets `restartPolicy=Always` and forces pod recreation.
+Start (resume) a paused agent. Sets `spec.paused=false` and forces pod recreation.
 ```bash
 curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/start
 # {"status":"ok","data":{"started":true}}
 ```
+
+---
+
+### Self-healing
+
+Every agent has **self-healing enabled by default**. If the Agent CR is deleted externally (e.g. `kubectl delete agt my-agent`), the orchestrator automatically recreates it with the same spec after the deletion is finalised.
+
+Self-healing operates at two levels:
+
+| Level | Mechanism | Always active |
+|-------|-----------|:-:|
+| **Pod** | `Owns(&corev1.Pod{})` — pod deletion triggers immediate reconcile → pod recreated | ✅ |
+| **Agent CR** | Finalizer-based resurrection — CR deleted → goroutine recreates new CR with same spec | ✅ (unless disabled) |
+
+#### `POST /api/v1/namespaces/:namespace/agents/:name/disable-healing`
+Disable automatic resurrection for this agent (`spec.selfHealingDisabled=true`). The Agent CR will be permanently deleted when `kubectl delete` is called.
+```bash
+curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/disable-healing
+# {"status":"ok","data":{"selfHealingDisabled":true}}
+```
+
+#### `POST /api/v1/namespaces/:namespace/agents/:name/enable-healing`
+Re-enable automatic resurrection (`spec.selfHealingDisabled=false`). This is the default state for all newly created agents.
+```bash
+curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/enable-healing
+# {"status":"ok","data":{"selfHealingDisabled":false}}
+```
+
+> **Tip:** To permanently delete a self-healing agent, either call `/disable-healing` first, or use the REST `DELETE` endpoint which bypasses self-healing.
 
 ---
 

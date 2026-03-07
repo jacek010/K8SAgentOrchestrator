@@ -7,8 +7,6 @@ metadata:
     app.kubernetes.io/managed-by: k8s-agent-orchestrator
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-    # Helm will not delete this CRD on `helm uninstall`.
-    # To fully remove, run: kubectl delete crd agents.orchestrator.dev
 spec:
   group: orchestrator.dev
   names:
@@ -37,6 +35,9 @@ spec:
         - name: Image
           type: string
           jsonPath: .spec.image
+        - name: HealingOff
+          type: boolean
+          jsonPath: .spec.selfHealingDisabled
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -60,11 +61,17 @@ spec:
                 - image
               properties:
                 image:
+                  description: Image is the container image to run.
                   type: string
                 imagePullPolicy:
+                  description: "ImagePullPolicy for the container. Defaults to IfNotPresent."
                   type: string
-                  enum: [Always, Never, IfNotPresent]
+                  enum:
+                    - Always
+                    - Never
+                    - IfNotPresent
                 imagePullSecrets:
+                  description: ImagePullSecrets is an optional list of references to secrets.
                   type: array
                   items:
                     type: object
@@ -72,10 +79,12 @@ spec:
                       name:
                         type: string
                 env:
+                  description: Env is a list of environment variables to inject into the agent container.
                   type: array
                   items:
                     type: object
-                    required: [name]
+                    required:
+                      - name
                     properties:
                       name:
                         type: string
@@ -83,13 +92,76 @@ spec:
                         type: string
                       valueFrom:
                         type: object
-                        x-kubernetes-preserve-unknown-fields: true
+                        properties:
+                          configMapKeyRef:
+                            type: object
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                type: string
+                              optional:
+                                type: boolean
+                            required:
+                              - key
+                          fieldRef:
+                            type: object
+                            properties:
+                              apiVersion:
+                                type: string
+                              fieldPath:
+                                type: string
+                            required:
+                              - fieldPath
+                          resourceFieldRef:
+                            type: object
+                            properties:
+                              containerName:
+                                type: string
+                              divisor:
+                                anyOf:
+                                  - type: integer
+                                  - type: string
+                                x-kubernetes-int-or-string: true
+                              resource:
+                                type: string
+                            required:
+                              - resource
+                          secretKeyRef:
+                            type: object
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                type: string
+                              optional:
+                                type: boolean
+                            required:
+                              - key
                 envFrom:
+                  description: EnvFrom lists sources to populate environment variables.
                   type: array
                   items:
                     type: object
-                    x-kubernetes-preserve-unknown-fields: true
+                    properties:
+                      configMapRef:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          optional:
+                            type: boolean
+                      prefix:
+                        type: string
+                      secretRef:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          optional:
+                            type: boolean
                 resources:
+                  description: Resources specifies resource requirements.
                   type: object
                   properties:
                     limits:
@@ -99,58 +171,86 @@ spec:
                       type: object
                       x-kubernetes-preserve-unknown-fields: true
                 serviceAccountName:
+                  description: ServiceAccountName is the name of the ServiceAccount.
                   type: string
                 command:
+                  description: Command overrides the ENTRYPOINT of the container.
                   type: array
                   items:
                     type: string
                 args:
+                  description: Args overrides the CMD of the container.
                   type: array
                   items:
                     type: string
                 volumes:
+                  description: Volumes defines additional volumes to mount.
                   type: array
+                  x-kubernetes-preserve-unknown-fields: true
                   items:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
                 volumeMounts:
+                  description: VolumeMounts defines additional volume mounts.
                   type: array
                   items:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
                 restartPolicy:
+                  description: RestartPolicy for the agent Pod.
                   type: string
-                  enum: [Always, OnFailure, Never]
+                  enum:
+                    - Always
+                    - OnFailure
+                    - Never
                 podLabels:
+                  description: Labels to add to the agent Pod.
                   type: object
                   additionalProperties:
                     type: string
                 podAnnotations:
+                  description: Annotations to add to the agent Pod.
                   type: object
                   additionalProperties:
                     type: string
+                paused:
+                  description: Paused, when true, prevents the controller from creating or recreating the Pod.
+                  type: boolean
+                selfHealingDisabled:
+                  description: SelfHealingDisabled, when true, turns off automatic resurrection of this Agent CR. Default false means self-healing is ON.
+                  type: boolean
             status:
+              description: AgentStatus defines the observed state of an Agent.
               type: object
               properties:
                 phase:
+                  description: Phase is the current lifecycle phase.
                   type: string
                 podName:
+                  description: PodName is the name of the Pod currently managing this agent.
                   type: string
                 podIP:
+                  description: PodIP is the IP address of the current agent Pod.
                   type: string
                 message:
+                  description: Message provides a human-readable description of the current status.
                   type: string
                 observedGeneration:
+                  description: ObservedGeneration is the most recent generation observed.
                   type: integer
                   format: int64
                 lastUpdated:
+                  description: LastUpdated is the time of the last status update.
                   type: string
                   format: date-time
                 conditions:
+                  description: Conditions represents the latest available observations.
                   type: array
                   items:
                     type: object
-                    required: [type, status]
+                    required:
+                      - type
+                      - status
                     properties:
                       type:
                         type: string
@@ -163,3 +263,10 @@ spec:
                         type: string
                       message:
                         type: string
+                restoredAt:
+                  description: RestoredAt is set when this Agent CR was resurrected by the self-healing mechanism.
+                  type: string
+                  format: date-time
+                restoredFrom:
+                  description: RestoredFrom is the original Agent name that was deleted and triggered this resurrection.
+                  type: string

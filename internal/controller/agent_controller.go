@@ -72,6 +72,18 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
+	// If agent is paused, ensure pod is deleted and set Stopped phase.
+	if agent.Spec.Paused {
+		if pod != nil {
+			logger.Info("Agent is paused, deleting Pod")
+			if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+				return ctrl.Result{}, fmt.Errorf("deleting pod for paused agent: %w", err)
+			}
+		}
+		_ = r.updateStatus(ctx, agent, orchestratorv1alpha1.AgentPhaseStopped, "", "Agent is paused")
+		return ctrl.Result{}, nil
+	}
+
 	// If no Pod exists, create one.
 	if pod == nil {
 		logger.Info("Creating Pod for Agent")
@@ -105,7 +117,13 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 }
 
 // handleDeletion removes the owned Pod and then removes the finalizer.
+// If self-healing is not disabled, it enqueues a resurrection of the Agent CR
+// AFTER the finalizer is removed — this ensures the old CR is actually gone from
+// the API before the new one is created.
 func (r *AgentReconciler) handleDeletion(ctx context.Context, agent *orchestratorv1alpha1.Agent) (ctrl.Result, error) {
+	logger := log.FromContext(ctx).WithValues("agent", agent.Name, "namespace", agent.Namespace)
+
+	// 1. Delete the owned Pod.
 	pod, err := r.findAgentPod(ctx, agent)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -115,11 +133,109 @@ func (r *AgentReconciler) handleDeletion(ctx context.Context, agent *orchestrato
 			return ctrl.Result{}, fmt.Errorf("deleting agent pod: %w", err)
 		}
 	}
+
+	// 2. Capture resurrection data BEFORE removing the finalizer (agent object
+	//    becomes invalid after Update removes the finalizer).
+	shouldResurrect := !agent.Spec.SelfHealingDisabled
+	var resurrectedSpec *orchestratorv1alpha1.AgentSpec
+	var originalUID, agentName, agentNamespace string
+	var agentLabels, agentAnnotations map[string]string
+	if shouldResurrect {
+		resurrectedSpec = agent.Spec.DeepCopy()
+		originalUID = string(agent.UID)
+		agentName = agent.Name
+		agentNamespace = agent.Namespace
+		agentLabels = make(map[string]string, len(agent.Labels))
+		for k, v := range agent.Labels {
+			agentLabels[k] = v
+		}
+		agentAnnotations = make(map[string]string, len(agent.Annotations))
+		for k, v := range agent.Annotations {
+			agentAnnotations[k] = v
+		}
+	}
+
+	// 3. Remove finalizer — K8s will GC the old CR after this Update.
 	controllerutil.RemoveFinalizer(agent, agentFinalizer)
 	if err := r.Update(ctx, agent); err != nil {
 		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 	}
+
+	// 4. Resurrect AFTER finalizer removal, in a goroutine with a long-lived context
+	//    so it is not cancelled when the reconcile request completes.
+	if shouldResurrect {
+		logger.Info("Self-healing: scheduling resurrection after finalizer removal")
+		go r.resurrectAgentAsync(agentNamespace, agentName, originalUID, resurrectedSpec, agentLabels, agentAnnotations)
+	}
+
 	return ctrl.Result{}, nil
+}
+
+// resurrectAgentAsync runs in a goroutine: it waits for the old CR to be fully
+// garbage-collected, then creates a new Agent CR with the same spec.
+// It distinguishes between "old CR still terminating" (same UID → retry) and
+// "a brand-new CR was already created" (different UID → skip).
+func (r *AgentReconciler) resurrectAgentAsync(
+	namespace, name, originalUID string,
+	spec *orchestratorv1alpha1.AgentSpec,
+	labels, annotations map[string]string,
+) {
+	bgCtx := context.Background()
+	logger := log.FromContext(bgCtx).WithValues("agent", name, "namespace", namespace)
+	now := metav1.Now()
+
+	// Build resurrection annotations (preserve user annotations, add meta).
+	resurrectedAnnotations := make(map[string]string, len(annotations)+2)
+	for k, v := range annotations {
+		resurrectedAnnotations[k] = v
+	}
+	resurrectedAnnotations["orchestrator.dev/resurrected-at"] = now.UTC().Format(time.RFC3339)
+	resurrectedAnnotations["orchestrator.dev/resurrection-uid"] = originalUID
+
+	resurrected := &orchestratorv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Labels:      labels,
+			Annotations: resurrectedAnnotations,
+		},
+		Spec: *spec,
+	}
+
+	// Retry loop: the old CR may still be present in the API for a short time
+	// after finalizer removal (Kubernetes GC is async).
+	for attempt := 1; attempt <= 15; attempt++ {
+		// Back off before each attempt; first attempt has a short delay to let GC run.
+		time.Sleep(time.Duration(attempt) * 300 * time.Millisecond)
+
+		err := r.Create(bgCtx, resurrected.DeepCopy())
+		if err == nil {
+			logger.Info("Resurrected agent successfully", "attempt", attempt)
+			return
+		}
+
+		if !apierrors.IsAlreadyExists(err) {
+			logger.Error(err, "Resurrection attempt failed, will retry", "attempt", attempt)
+			continue
+		}
+
+		// AlreadyExists: check whether it's the OLD terminating CR (same UID)
+		// or a genuinely new CR created by someone else.
+		existing := &orchestratorv1alpha1.Agent{}
+		if getErr := r.Get(bgCtx, types.NamespacedName{Namespace: namespace, Name: name}, existing); getErr != nil {
+			// Can't read — might be a transient error; retry.
+			continue
+		}
+		if string(existing.UID) == originalUID {
+			// Same CR, still being garbage-collected — retry.
+			logger.Info("Old CR still terminating, retrying", "attempt", attempt)
+			continue
+		}
+		// Different UID: a new CR already exists (user re-created it manually).
+		logger.Info("Resurrection skipped: new agent CR already exists with different UID")
+		return
+	}
+	logger.Error(fmt.Errorf("gave up after 15 attempts"), "Failed to resurrect agent")
 }
 
 // findAgentPod returns the Pod owned by this Agent, or nil if not found.

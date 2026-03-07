@@ -255,7 +255,7 @@ const docTemplate = `{
                 }
             },
             "delete": {
-                "description": "Deletes the Agent CR; the controller removes the Pod via finalizer. Also clears the in-memory cache.",
+                "description": "Permanently deletes the Agent CR and its Pod. Self-healing is disabled before deletion so the agent is not resurrected. Also clears the in-memory cache.",
                 "produces": [
                     "application/json"
                 ],
@@ -535,6 +535,116 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/disable-healing": {
+            "post": {
+                "description": "Sets spec.selfHealingDisabled=true. The Agent CR will NOT be recreated automatically when deleted externally.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lifecycle"
+                ],
+                "summary": "Disable self-healing",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "selfHealingDisabled: true",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/enable-healing": {
+            "post": {
+                "description": "Sets spec.selfHealingDisabled=false. The Agent CR will be automatically recreated when deleted externally (this is the default behaviour).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lifecycle"
+                ],
+                "summary": "Enable self-healing",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "selfHealingDisabled: false",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -943,7 +1053,7 @@ const docTemplate = `{
         },
         "/api/v1/namespaces/{namespace}/agents/{name}/start": {
             "post": {
-                "description": "Resumes a stopped agent: resets restartPolicy=Always and forces pod recreation",
+                "description": "Resumes a paused agent: sets spec.paused=false and forces pod recreation",
                 "produces": [
                     "application/json"
                 ],
@@ -998,7 +1108,7 @@ const docTemplate = `{
         },
         "/api/v1/namespaces/{namespace}/agents/{name}/stop": {
             "post": {
-                "description": "Sets restartPolicy=Never so the pod is not restarted after it exits",
+                "description": "Pauses the agent: sets spec.paused=true, which causes the controller to delete the Pod and stop reconciling",
                 "produces": [
                     "application/json"
                 ],
@@ -1173,6 +1283,10 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "paused": {
+                    "description": "Paused prevents pod creation when true.",
+                    "type": "boolean"
+                },
                 "podAnnotations": {
                     "type": "object",
                     "additionalProperties": {
@@ -1190,6 +1304,10 @@ const docTemplate = `{
                 },
                 "restartPolicy": {
                     "type": "string"
+                },
+                "selfHealingDisabled": {
+                    "description": "SelfHealingDisabled disables automatic resurrection of this Agent CR when deleted externally.\nDefault false means self-healing is ON.",
+                    "type": "boolean"
                 },
                 "serviceAccountName": {
                     "type": "string"

@@ -104,6 +104,11 @@ type CreateAgentRequest struct {
 	PodAnnotations  map[string]string             `json:"podAnnotations,omitempty"`
 	Labels          map[string]string             `json:"labels,omitempty"`
 	Annotations     map[string]string             `json:"annotations,omitempty"`
+	// SelfHealingDisabled disables automatic resurrection of this Agent CR when deleted externally.
+	// Default false means self-healing is ON.
+	SelfHealingDisabled bool `json:"selfHealingDisabled,omitempty"`
+	// Paused prevents pod creation when true.
+	Paused bool `json:"paused,omitempty"`
 }
 
 // handleCreateAgent godoc
@@ -150,6 +155,8 @@ func (s *Server) handleCreateAgent(c *gin.Context) {
 			RestartPolicy:      restartPolicy,
 			PodLabels:          req.PodLabels,
 			PodAnnotations:     req.PodAnnotations,
+			SelfHealingDisabled: req.SelfHealingDisabled,
+			Paused:              req.Paused,
 		},
 	}
 
@@ -293,7 +300,7 @@ func (s *Server) handleUpdateAgent(c *gin.Context) {
 
 // handleDeleteAgent godoc
 // @Summary      Delete agent
-// @Description  Deletes the Agent CR; the controller removes the Pod via finalizer. Also clears the in-memory cache.
+// @Description  Permanently deletes the Agent CR and its Pod. Self-healing is disabled before deletion so the agent is not resurrected. Also clears the in-memory cache.
 // @Tags         agents
 // @Produce      json
 // @Param        namespace  path      string  true  "Kubernetes namespace"
@@ -315,6 +322,16 @@ func (s *Server) handleDeleteAgent(c *gin.Context) {
 		}
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Disable self-healing before deleting so the agent is not resurrected.
+	if !agent.Spec.SelfHealingDisabled {
+		patch := client.MergeFrom(agent.DeepCopy())
+		agent.Spec.SelfHealingDisabled = true
+		if err := s.client.Patch(ctx, agent, patch); err != nil {
+			respondError(c, http.StatusInternalServerError, "disabling self-healing: "+err.Error())
+			return
+		}
 	}
 
 	if err := s.client.Delete(ctx, agent); err != nil {
@@ -372,7 +389,7 @@ func (s *Server) handleRestartAgent(c *gin.Context) {
 
 // handleStopAgent godoc
 // @Summary      Stop agent
-// @Description  Sets restartPolicy=Never so the pod is not restarted after it exits
+// @Description  Pauses the agent: sets spec.paused=true, which causes the controller to delete the Pod and stop reconciling
 // @Tags         lifecycle
 // @Produce      json
 // @Param        namespace  path      string  true  "Kubernetes namespace"
@@ -397,8 +414,7 @@ func (s *Server) handleStopAgent(c *gin.Context) {
 	}
 
 	patch := client.MergeFrom(agent.DeepCopy())
-	// Use a Never restart policy so the pod stops and is not restarted.
-	agent.Spec.RestartPolicy = corev1.RestartPolicyNever
+	agent.Spec.Paused = true
 	if agent.Annotations == nil {
 		agent.Annotations = make(map[string]string)
 	}
@@ -413,7 +429,7 @@ func (s *Server) handleStopAgent(c *gin.Context) {
 
 // handleStartAgent godoc
 // @Summary      Start agent
-// @Description  Resumes a stopped agent: resets restartPolicy=Always and forces pod recreation
+// @Description  Resumes a paused agent: sets spec.paused=false and forces pod recreation
 // @Tags         lifecycle
 // @Produce      json
 // @Param        namespace  path      string  true  "Kubernetes namespace"
@@ -438,9 +454,7 @@ func (s *Server) handleStartAgent(c *gin.Context) {
 	}
 
 	patch := client.MergeFrom(agent.DeepCopy())
-	if agent.Spec.RestartPolicy == corev1.RestartPolicyNever {
-		agent.Spec.RestartPolicy = corev1.RestartPolicyAlways
-	}
+	agent.Spec.Paused = false
 	if agent.Annotations == nil {
 		agent.Annotations = make(map[string]string)
 	}
@@ -453,6 +467,78 @@ func (s *Server) handleStartAgent(c *gin.Context) {
 		return
 	}
 	respondOK(c, gin.H{"started": true})
+}
+
+// handleDisableSelfHealing godoc
+// @Summary      Disable self-healing
+// @Description  Sets spec.selfHealingDisabled=true. The Agent CR will NOT be recreated automatically when deleted externally.
+// @Tags         lifecycle
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}  "selfHealingDisabled: true"
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/disable-healing [post]
+func (s *Server) handleDisableSelfHealing(c *gin.Context) {
+	namespace, name := s.nsName(c)
+	ctx, cancel := apiCtx()
+	defer cancel()
+
+	agent := &orchestratorv1alpha1.Agent{}
+	if err := s.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, agent); err != nil {
+		if apierrors.IsNotFound(err) {
+			respondError(c, http.StatusNotFound, "agent not found")
+			return
+		}
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	patch := client.MergeFrom(agent.DeepCopy())
+	agent.Spec.SelfHealingDisabled = true
+
+	if err := s.client.Patch(ctx, agent, patch); err != nil {
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondOK(c, gin.H{"selfHealingDisabled": true})
+}
+
+// handleEnableSelfHealing godoc
+// @Summary      Enable self-healing
+// @Description  Sets spec.selfHealingDisabled=false. The Agent CR will be automatically recreated when deleted externally (this is the default behaviour).
+// @Tags         lifecycle
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}  "selfHealingDisabled: false"
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/enable-healing [post]
+func (s *Server) handleEnableSelfHealing(c *gin.Context) {
+	namespace, name := s.nsName(c)
+	ctx, cancel := apiCtx()
+	defer cancel()
+
+	agent := &orchestratorv1alpha1.Agent{}
+	if err := s.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, agent); err != nil {
+		if apierrors.IsNotFound(err) {
+			respondError(c, http.StatusNotFound, "agent not found")
+			return
+		}
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	patch := client.MergeFrom(agent.DeepCopy())
+	agent.Spec.SelfHealingDisabled = false
+
+	if err := s.client.Patch(ctx, agent, patch); err != nil {
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	respondOK(c, gin.H{"selfHealingDisabled": false})
 }
 
 // ─────────────────────────────── Env management ───────────────────────────────

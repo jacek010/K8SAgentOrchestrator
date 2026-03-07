@@ -14,6 +14,8 @@ const (
 	AgentPhaseFailed   AgentPhase = "Failed"
 	AgentPhaseStopped  AgentPhase = "Stopped"
 	AgentPhaseUpdating AgentPhase = "Updating"
+	// AgentPhaseRestoring is set while a protected Agent CR is being resurrected.
+	AgentPhaseRestoring AgentPhase = "Restoring"
 )
 
 // AgentSpec defines the desired state of an Agent.
@@ -75,6 +77,17 @@ type AgentSpec struct {
 	// Annotations to add to the agent Pod.
 	// +optional
 	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
+
+	// Paused, when true, prevents the controller from creating or recreating the Pod.
+	// Use POST /stop to set this field via the REST API.
+	// +optional
+	Paused bool `json:"paused,omitempty"`
+
+	// SelfHealingDisabled, when true, turns off automatic resurrection of this Agent CR
+	// when it is deleted externally (e.g. via kubectl delete agent).
+	// By default (false) the orchestrator will recreate the Agent CR automatically.
+	// +optional
+	SelfHealingDisabled bool `json:"selfHealingDisabled,omitempty"`
 }
 
 // AgentConditionType defines the type of condition.
@@ -124,6 +137,14 @@ type AgentStatus struct {
 	// Conditions represents the latest available observations of the Agent's state.
 	// +optional
 	Conditions []AgentCondition `json:"conditions,omitempty"`
+
+	// RestoredAt is set when this Agent CR was resurrected by the self-healing mechanism.
+	// +optional
+	RestoredAt *metav1.Time `json:"restoredAt,omitempty"`
+
+	// RestoredFrom is the original Agent name that was deleted and triggered this resurrection.
+	// +optional
+	RestoredFrom string `json:"restoredFrom,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -132,6 +153,7 @@ type AgentStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Pod",type="string",JSONPath=".status.podName"
 // +kubebuilder:printcolumn:name="Image",type="string",JSONPath=".spec.image"
+// +kubebuilder:printcolumn:name="HealingOff",type="boolean",JSONPath=".spec.selfHealingDisabled"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // Agent is the Schema for the agents API.

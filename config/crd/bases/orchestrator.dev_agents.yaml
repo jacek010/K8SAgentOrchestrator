@@ -35,6 +35,9 @@ spec:
         - name: Image
           type: string
           jsonPath: .spec.image
+        - name: HealingOff
+          type: boolean
+          jsonPath: .spec.selfHealingDisabled
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -210,6 +213,12 @@ spec:
                   type: object
                   additionalProperties:
                     type: string
+                paused:
+                  description: Paused, when true, prevents the controller from creating or recreating the Pod.
+                  type: boolean
+                selfHealingDisabled:
+                  description: SelfHealingDisabled, when true, turns off automatic resurrection of this Agent CR. Default false means self-healing is ON.
+                  type: boolean
             status:
               description: AgentStatus defines the observed state of an Agent.
               type: object
@@ -254,3 +263,10 @@ spec:
                         type: string
                       message:
                         type: string
+                restoredAt:
+                  description: RestoredAt is set when this Agent CR was resurrected by the self-healing mechanism.
+                  type: string
+                  format: date-time
+                restoredFrom:
+                  description: RestoredFrom is the original Agent name that was deleted and triggered this resurrection.
+                  type: string

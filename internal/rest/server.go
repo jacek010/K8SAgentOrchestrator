@@ -89,6 +89,8 @@ func (s *Server) registerRoutes() {
 				agents.POST("/:name/restart", s.handleRestartAgent)
 				agents.POST("/:name/stop", s.handleStopAgent)
 				agents.POST("/:name/start", s.handleStartAgent)
+				agents.POST("/:name/disable-healing", s.handleDisableSelfHealing)
+				agents.POST("/:name/enable-healing", s.handleEnableSelfHealing)
 
 				// Environment variable management
 				agents.GET("/:name/env", s.handleGetEnv)
