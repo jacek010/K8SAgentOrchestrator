@@ -55,10 +55,25 @@ func (s *Server) rawClientset() (kubernetes.Interface, error) {
 
 // ─────────────────────────────── health ──────────────────────────────────────
 
+// handleHealthz godoc
+// @Summary      Liveness probe
+// @Description  Returns 200 OK if the process is alive
+// @Tags         health
+// @Produce      json
+// @Success      200  {object}  map[string]string  "ok"
+// @Router       /healthz [get]
 func (s *Server) handleHealthz(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// handleReadyz godoc
+// @Summary      Readiness probe
+// @Description  Returns 200 if the Kubernetes API server is reachable, 503 otherwise
+// @Tags         health
+// @Produce      json
+// @Success      200  {object}  map[string]string  "ready"
+// @Failure      503  {object}  map[string]string  "k8s api not reachable"
+// @Router       /readyz [get]
 func (s *Server) handleReadyz(c *gin.Context) {
 	ctx, cancel := apiCtx()
 	defer cancel()
@@ -91,6 +106,19 @@ type CreateAgentRequest struct {
 	Annotations     map[string]string             `json:"annotations,omitempty"`
 }
 
+// handleCreateAgent godoc
+// @Summary      Create agent
+// @Description  Creates a new Agent CR; the controller then creates a Pod for it
+// @Tags         agents
+// @Accept       json
+// @Produce      json
+// @Param        namespace  path      string              true   "Kubernetes namespace"
+// @Param        body       body      CreateAgentRequest  true   "Agent specification"
+// @Success      201        {object}  map[string]interface{}   "created"
+// @Failure      400        {object}  map[string]string        "invalid body"
+// @Failure      409        {object}  map[string]string        "agent already exists"
+// @Failure      500        {object}  map[string]string        "internal error"
+// @Router       /api/v1/namespaces/{namespace}/agents [post]
 func (s *Server) handleCreateAgent(c *gin.Context) {
 	namespace, _ := s.nsName(c)
 
@@ -139,6 +167,15 @@ func (s *Server) handleCreateAgent(c *gin.Context) {
 	respondCreated(c, agent)
 }
 
+// handleListAgents godoc
+// @Summary      List agents
+// @Description  Returns all Agent CRs in the given namespace
+// @Tags         agents
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Success      200        {object}  map[string]interface{}  "list of agents"
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents [get]
 func (s *Server) handleListAgents(c *gin.Context) {
 	namespace, _ := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -152,6 +189,17 @@ func (s *Server) handleListAgents(c *gin.Context) {
 	respondOK(c, agentList.Items)
 }
 
+// handleGetAgent godoc
+// @Summary      Get agent
+// @Description  Returns a single Agent CR with its current status (phase, podName, conditions)
+// @Tags         agents
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name} [get]
 func (s *Server) handleGetAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -169,6 +217,20 @@ func (s *Server) handleGetAgent(c *gin.Context) {
 	respondOK(c, agent)
 }
 
+// handleUpdateAgent godoc
+// @Summary      Update agent
+// @Description  Updates Agent spec fields; only non-zero fields are applied. Triggers pod recreation.
+// @Tags         agents
+// @Accept       json
+// @Produce      json
+// @Param        namespace  path      string              true  "Kubernetes namespace"
+// @Param        name       path      string              true  "Agent name"
+// @Param        body       body      CreateAgentRequest  true  "Fields to update"
+// @Success      200        {object}  map[string]interface{}
+// @Failure      400        {object}  map[string]string
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name} [put]
 func (s *Server) handleUpdateAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -229,6 +291,17 @@ func (s *Server) handleUpdateAgent(c *gin.Context) {
 	respondOK(c, agent)
 }
 
+// handleDeleteAgent godoc
+// @Summary      Delete agent
+// @Description  Deletes the Agent CR; the controller removes the Pod via finalizer. Also clears the in-memory cache.
+// @Tags         agents
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]string  "deleted"
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name} [delete]
 func (s *Server) handleDeleteAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -257,6 +330,17 @@ func (s *Server) handleDeleteAgent(c *gin.Context) {
 
 // ─────────────────────────────── Lifecycle ───────────────────────────────────
 
+// handleRestartAgent godoc
+// @Summary      Restart agent
+// @Description  Forces pod recreation by bumping the orchestrator.dev/restart-at annotation
+// @Tags         lifecycle
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}  "restarted: true"
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/restart [post]
 func (s *Server) handleRestartAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -286,6 +370,17 @@ func (s *Server) handleRestartAgent(c *gin.Context) {
 	respondOK(c, gin.H{"restarted": true})
 }
 
+// handleStopAgent godoc
+// @Summary      Stop agent
+// @Description  Sets restartPolicy=Never so the pod is not restarted after it exits
+// @Tags         lifecycle
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}  "stopped: true"
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/stop [post]
 func (s *Server) handleStopAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -316,6 +411,17 @@ func (s *Server) handleStopAgent(c *gin.Context) {
 	respondOK(c, gin.H{"stopped": true})
 }
 
+// handleStartAgent godoc
+// @Summary      Start agent
+// @Description  Resumes a stopped agent: resets restartPolicy=Always and forces pod recreation
+// @Tags         lifecycle
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}  "started: true"
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/start [post]
 func (s *Server) handleStartAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -351,6 +457,17 @@ func (s *Server) handleStartAgent(c *gin.Context) {
 
 // ─────────────────────────────── Env management ───────────────────────────────
 
+// handleGetEnv godoc
+// @Summary      Get env vars
+// @Description  Returns the current list of environment variables for the agent container
+// @Tags         env
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}  "list of EnvVar"
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/env [get]
 func (s *Server) handleGetEnv(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -373,6 +490,20 @@ type EnvSetRequest struct {
 	Env []corev1.EnvVar `json:"env" binding:"required"`
 }
 
+// handleSetEnv godoc
+// @Summary      Replace env vars
+// @Description  Replaces the entire env list (destructive). Triggers pod recreation.
+// @Tags         env
+// @Accept       json
+// @Produce      json
+// @Param        namespace  path      string         true  "Kubernetes namespace"
+// @Param        name       path      string         true  "Agent name"
+// @Param        body       body      EnvSetRequest  true  "New env list"
+// @Success      200        {object}  map[string]interface{}
+// @Failure      400        {object}  map[string]string
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/env [put]
 func (s *Server) handleSetEnv(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -408,6 +539,20 @@ type EnvMergeRequest struct {
 	Env []corev1.EnvVar `json:"env" binding:"required"`
 }
 
+// handleMergeEnv godoc
+// @Summary      Merge env vars
+// @Description  Upserts env vars by name — existing keys are updated, new keys are appended, unmentioned keys are left intact. Triggers pod recreation.
+// @Tags         env
+// @Accept       json
+// @Produce      json
+// @Param        namespace  path      string           true  "Kubernetes namespace"
+// @Param        name       path      string           true  "Agent name"
+// @Param        body       body      EnvMergeRequest  true  "Env vars to merge"
+// @Success      200        {object}  map[string]interface{}
+// @Failure      400        {object}  map[string]string
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/env [patch]
 func (s *Server) handleMergeEnv(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -440,6 +585,18 @@ func (s *Server) handleMergeEnv(c *gin.Context) {
 	respondOK(c, agent.Spec.Env)
 }
 
+// handleDeleteEnvKey godoc
+// @Summary      Delete env var
+// @Description  Removes a single environment variable by name. Triggers pod recreation.
+// @Tags         env
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Param        key        path      string  true  "Env var name to delete"
+// @Success      200        {object}  map[string]interface{}
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/env/{key} [delete]
 func (s *Server) handleDeleteEnvKey(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	key := c.Param("key")
@@ -493,6 +650,21 @@ func mergeEnvVars(existing, newVars []corev1.EnvVar) []corev1.EnvVar {
 
 // ─────────────────────────────── Logs ────────────────────────────────────────
 
+// handleGetLogs godoc
+// @Summary      Get pod logs
+// @Description  Returns or streams logs from the agent's pod. Use follow=true for live streaming (chunked transfer).
+// @Tags         logs
+// @Produce      plain
+// @Param        namespace    path      string  true   "Kubernetes namespace"
+// @Param        name         path      string  true   "Agent name"
+// @Param        tailLines    query     integer false  "Number of lines from the end" default(100)
+// @Param        sinceSeconds query     integer false  "Only lines newer than N seconds"
+// @Param        container    query     string  false  "Container name" default(agent)
+// @Param        follow       query     boolean false  "Stream logs (chunked transfer)" default(false)
+// @Success      200          {string}  string  "log lines"
+// @Failure      404          {object}  map[string]string
+// @Failure      500          {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/logs [get]
 func (s *Server) handleGetLogs(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -573,12 +745,32 @@ func (s *Server) handleGetLogs(c *gin.Context) {
 
 // ─────────────────────────────── Cache ───────────────────────────────────────
 
+// handleListCache godoc
+// @Summary      List cache entries
+// @Description  Returns all in-memory cache entries for the given agent
+// @Tags         cache
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache [get]
 func (s *Server) handleListCache(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	entries := s.cache.List(namespace, name)
 	respondOK(c, entries)
 }
 
+// handleGetCacheField godoc
+// @Summary      Get cache field
+// @Description  Returns a single cache entry by field name. Returns 404 if missing or expired.
+// @Tags         cache
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Param        field      path      string  true  "Cache field name"
+// @Success      200        {object}  map[string]interface{}
+// @Failure      404        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache/{field} [get]
 func (s *Server) handleGetCacheField(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	field := c.Param("field")
@@ -595,6 +787,19 @@ type CacheSetRequest struct {
 	TTL   int         `json:"ttl_seconds,omitempty"` // 0 = no expiry
 }
 
+// handleSetCacheField godoc
+// @Summary      Set cache field
+// @Description  Stores a value in the per-agent cache with an optional TTL. ttl_seconds=0 means no expiry.
+// @Tags         cache
+// @Accept       json
+// @Produce      json
+// @Param        namespace  path      string          true  "Kubernetes namespace"
+// @Param        name       path      string          true  "Agent name"
+// @Param        field      path      string          true  "Cache field name"
+// @Param        body       body      CacheSetRequest true  "Value and optional TTL"
+// @Success      200        {object}  map[string]interface{}
+// @Failure      400        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache/{field} [put]
 func (s *Server) handleSetCacheField(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	field := c.Param("field")
@@ -610,6 +815,16 @@ func (s *Server) handleSetCacheField(c *gin.Context) {
 	respondOK(c, gin.H{"field": field, "set": true})
 }
 
+// handleDeleteCacheField godoc
+// @Summary      Delete cache field
+// @Description  Removes a single field from the per-agent cache
+// @Tags         cache
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Param        field      path      string  true  "Cache field name"
+// @Success      200        {object}  map[string]interface{}  "deleted: true"
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache/{field} [delete]
 func (s *Server) handleDeleteCacheField(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	field := c.Param("field")
@@ -617,6 +832,15 @@ func (s *Server) handleDeleteCacheField(c *gin.Context) {
 	respondOK(c, gin.H{"field": field, "deleted": true})
 }
 
+// handleClearCache godoc
+// @Summary      Clear agent cache
+// @Description  Removes all cache entries for the given agent
+// @Tags         cache
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}  "cleared: true"
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache [delete]
 func (s *Server) handleClearCache(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	s.cache.ClearAgent(namespace, name)

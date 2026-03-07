@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/cache"
@@ -63,6 +65,9 @@ func (s *Server) Handler() http.Handler {
 
 // registerRoutes wires all API endpoints.
 func (s *Server) registerRoutes() {
+	// Swagger UI — http://localhost:8082/swagger/index.html
+	s.engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
 	v1 := s.engine.Group("/api/v1")
 	{
 		// Health & readiness

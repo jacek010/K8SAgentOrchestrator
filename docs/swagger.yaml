@@ -1,0 +1,1120 @@
+basePath: /
+definitions:
+  internal_rest.CacheSetRequest:
+    properties:
+      ttl_seconds:
+        description: 0 = no expiry
+        type: integer
+      value: {}
+    required:
+    - value
+    type: object
+  internal_rest.CreateAgentRequest:
+    properties:
+      annotations:
+        additionalProperties:
+          type: string
+        type: object
+      args:
+        items:
+          type: string
+        type: array
+      command:
+        items:
+          type: string
+        type: array
+      env:
+        items:
+          $ref: '#/definitions/v1.EnvVar'
+        type: array
+      envFrom:
+        items:
+          $ref: '#/definitions/v1.EnvFromSource'
+        type: array
+      image:
+        type: string
+      imagePullPolicy:
+        type: string
+      labels:
+        additionalProperties:
+          type: string
+        type: object
+      name:
+        type: string
+      podAnnotations:
+        additionalProperties:
+          type: string
+        type: object
+      podLabels:
+        additionalProperties:
+          type: string
+        type: object
+      resources:
+        $ref: '#/definitions/v1.ResourceRequirements'
+      restartPolicy:
+        type: string
+      serviceAccountName:
+        type: string
+    required:
+    - image
+    - name
+    type: object
+  internal_rest.EnvMergeRequest:
+    properties:
+      env:
+        items:
+          $ref: '#/definitions/v1.EnvVar'
+        type: array
+    required:
+    - env
+    type: object
+  internal_rest.EnvSetRequest:
+    properties:
+      env:
+        items:
+          $ref: '#/definitions/v1.EnvVar'
+        type: array
+    required:
+    - env
+    type: object
+  resource.Quantity:
+    properties:
+      Format:
+        enum:
+        - DecimalExponent
+        - BinarySI
+        - DecimalSI
+        type: string
+        x-enum-comments:
+          BinarySI: e.g., 12Mi (12 * 2^20)
+          DecimalExponent: e.g., 12e6
+          DecimalSI: e.g., 12M  (12 * 10^6)
+        x-enum-descriptions:
+        - e.g., 12e6
+        - e.g., 12Mi (12 * 2^20)
+        - e.g., 12M  (12 * 10^6)
+        x-enum-varnames:
+        - DecimalExponent
+        - BinarySI
+        - DecimalSI
+    type: object
+  v1.ConfigMapEnvSource:
+    properties:
+      name:
+        description: |-
+          Name of the referent.
+          This field is effectively required, but due to backwards compatibility is
+          allowed to be empty. Instances of this type with an empty value here are
+          almost certainly wrong.
+          TODO: Add other useful fields. apiVersion, kind, uid?
+          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+          +optional
+          +default=""
+          +kubebuilder:default=""
+          TODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.
+        type: string
+      optional:
+        description: |-
+          Specify whether the ConfigMap must be defined
+          +optional
+        type: boolean
+    type: object
+  v1.ConfigMapKeySelector:
+    properties:
+      key:
+        description: The key to select.
+        type: string
+      name:
+        description: |-
+          Name of the referent.
+          This field is effectively required, but due to backwards compatibility is
+          allowed to be empty. Instances of this type with an empty value here are
+          almost certainly wrong.
+          TODO: Add other useful fields. apiVersion, kind, uid?
+          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+          +optional
+          +default=""
+          +kubebuilder:default=""
+          TODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.
+        type: string
+      optional:
+        description: |-
+          Specify whether the ConfigMap or its key must be defined
+          +optional
+        type: boolean
+    type: object
+  v1.EnvFromSource:
+    properties:
+      configMapRef:
+        allOf:
+        - $ref: '#/definitions/v1.ConfigMapEnvSource'
+        description: |-
+          The ConfigMap to select from
+          +optional
+      prefix:
+        description: |-
+          An optional identifier to prepend to each key in the ConfigMap. Must be a C_IDENTIFIER.
+          +optional
+        type: string
+      secretRef:
+        allOf:
+        - $ref: '#/definitions/v1.SecretEnvSource'
+        description: |-
+          The Secret to select from
+          +optional
+    type: object
+  v1.EnvVar:
+    properties:
+      name:
+        description: Name of the environment variable. Must be a C_IDENTIFIER.
+        type: string
+      value:
+        description: |-
+          Variable references $(VAR_NAME) are expanded
+          using the previously defined environment variables in the container and
+          any service environment variables. If a variable cannot be resolved,
+          the reference in the input string will be unchanged. Double $$ are reduced
+          to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+          "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+          Escaped references will never be expanded, regardless of whether the variable
+          exists or not.
+          Defaults to "".
+          +optional
+        type: string
+      valueFrom:
+        allOf:
+        - $ref: '#/definitions/v1.EnvVarSource'
+        description: |-
+          Source for the environment variable's value. Cannot be used if value is not empty.
+          +optional
+    type: object
+  v1.EnvVarSource:
+    properties:
+      configMapKeyRef:
+        allOf:
+        - $ref: '#/definitions/v1.ConfigMapKeySelector'
+        description: |-
+          Selects a key of a ConfigMap.
+          +optional
+      fieldRef:
+        allOf:
+        - $ref: '#/definitions/v1.ObjectFieldSelector'
+        description: |-
+          Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+          spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
+          +optional
+      resourceFieldRef:
+        allOf:
+        - $ref: '#/definitions/v1.ResourceFieldSelector'
+        description: |-
+          Selects a resource of the container: only resources limits and requests
+          (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
+          +optional
+      secretKeyRef:
+        allOf:
+        - $ref: '#/definitions/v1.SecretKeySelector'
+        description: |-
+          Selects a key of a secret in the pod's namespace
+          +optional
+    type: object
+  v1.ObjectFieldSelector:
+    properties:
+      apiVersion:
+        description: |-
+          Version of the schema the FieldPath is written in terms of, defaults to "v1".
+          +optional
+        type: string
+      fieldPath:
+        description: Path of the field to select in the specified API version.
+        type: string
+    type: object
+  v1.ResourceClaim:
+    properties:
+      name:
+        description: |-
+          Name must match the name of one entry in pod.spec.resourceClaims of
+          the Pod where this field is used. It makes that resource available
+          inside a container.
+        type: string
+      request:
+        description: |-
+          Request is the name chosen for a request in the referenced claim.
+          If empty, everything from the claim is made available, otherwise
+          only the result of this request.
+
+          +optional
+        type: string
+    type: object
+  v1.ResourceFieldSelector:
+    properties:
+      containerName:
+        description: |-
+          Container name: required for volumes, optional for env vars
+          +optional
+        type: string
+      divisor:
+        allOf:
+        - $ref: '#/definitions/resource.Quantity'
+        description: |-
+          Specifies the output format of the exposed resources, defaults to "1"
+          +optional
+      resource:
+        description: 'Required: resource to select'
+        type: string
+    type: object
+  v1.ResourceList:
+    additionalProperties:
+      $ref: '#/definitions/resource.Quantity'
+    type: object
+  v1.ResourceRequirements:
+    properties:
+      claims:
+        description: |-
+          Claims lists the names of resources, defined in spec.resourceClaims,
+          that are used by this container.
+
+          This is an alpha field and requires enabling the
+          DynamicResourceAllocation feature gate.
+
+          This field is immutable. It can only be set for containers.
+
+          +listType=map
+          +listMapKey=name
+          +featureGate=DynamicResourceAllocation
+          +optional
+        items:
+          $ref: '#/definitions/v1.ResourceClaim'
+        type: array
+      limits:
+        allOf:
+        - $ref: '#/definitions/v1.ResourceList'
+        description: |-
+          Limits describes the maximum amount of compute resources allowed.
+          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+          +optional
+      requests:
+        allOf:
+        - $ref: '#/definitions/v1.ResourceList'
+        description: |-
+          Requests describes the minimum amount of compute resources required.
+          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+          +optional
+    type: object
+  v1.SecretEnvSource:
+    properties:
+      name:
+        description: |-
+          Name of the referent.
+          This field is effectively required, but due to backwards compatibility is
+          allowed to be empty. Instances of this type with an empty value here are
+          almost certainly wrong.
+          TODO: Add other useful fields. apiVersion, kind, uid?
+          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+          +optional
+          +default=""
+          +kubebuilder:default=""
+          TODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.
+        type: string
+      optional:
+        description: |-
+          Specify whether the Secret must be defined
+          +optional
+        type: boolean
+    type: object
+  v1.SecretKeySelector:
+    properties:
+      key:
+        description: The key of the secret to select from.  Must be a valid secret
+          key.
+        type: string
+      name:
+        description: |-
+          Name of the referent.
+          This field is effectively required, but due to backwards compatibility is
+          allowed to be empty. Instances of this type with an empty value here are
+          almost certainly wrong.
+          TODO: Add other useful fields. apiVersion, kind, uid?
+          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+          +optional
+          +default=""
+          +kubebuilder:default=""
+          TODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.
+        type: string
+      optional:
+        description: |-
+          Specify whether the Secret or its key must be defined
+          +optional
+        type: boolean
+    type: object
+host: localhost:8082
+info:
+  contact:
+    name: Jacek Myjkowski
+  description: REST API for managing Kubernetes Agents (pods) — lifecycle control,
+    env patching, log streaming and per-agent cache.
+  license:
+    name: MIT
+  title: K8s Agent Orchestrator API
+  version: "1.0"
+paths:
+  /api/v1/namespaces/{namespace}/agents:
+    get:
+      description: Returns all Agent CRs in the given namespace
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: list of agents
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List agents
+      tags:
+      - agents
+    post:
+      consumes:
+      - application/json
+      description: Creates a new Agent CR; the controller then creates a Pod for it
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent specification
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_rest.CreateAgentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: invalid body
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: agent already exists
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: internal error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Create agent
+      tags:
+      - agents
+  /api/v1/namespaces/{namespace}/agents/{name}:
+    delete:
+      description: Deletes the Agent CR; the controller removes the Pod via finalizer.
+        Also clears the in-memory cache.
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: deleted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete agent
+      tags:
+      - agents
+    get:
+      description: Returns a single Agent CR with its current status (phase, podName,
+        conditions)
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get agent
+      tags:
+      - agents
+    put:
+      consumes:
+      - application/json
+      description: Updates Agent spec fields; only non-zero fields are applied. Triggers
+        pod recreation.
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_rest.CreateAgentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update agent
+      tags:
+      - agents
+  /api/v1/namespaces/{namespace}/agents/{name}/cache:
+    delete:
+      description: Removes all cache entries for the given agent
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'cleared: true'
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Clear agent cache
+      tags:
+      - cache
+    get:
+      description: Returns all in-memory cache entries for the given agent
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: List cache entries
+      tags:
+      - cache
+  /api/v1/namespaces/{namespace}/agents/{name}/cache/{field}:
+    delete:
+      description: Removes a single field from the per-agent cache
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Cache field name
+        in: path
+        name: field
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'deleted: true'
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Delete cache field
+      tags:
+      - cache
+    get:
+      description: Returns a single cache entry by field name. Returns 404 if missing
+        or expired.
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Cache field name
+        in: path
+        name: field
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get cache field
+      tags:
+      - cache
+    put:
+      consumes:
+      - application/json
+      description: Stores a value in the per-agent cache with an optional TTL. ttl_seconds=0
+        means no expiry.
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Cache field name
+        in: path
+        name: field
+        required: true
+        type: string
+      - description: Value and optional TTL
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_rest.CacheSetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Set cache field
+      tags:
+      - cache
+  /api/v1/namespaces/{namespace}/agents/{name}/env:
+    get:
+      description: Returns the current list of environment variables for the agent
+        container
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: list of EnvVar
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get env vars
+      tags:
+      - env
+    patch:
+      consumes:
+      - application/json
+      description: Upserts env vars by name — existing keys are updated, new keys
+        are appended, unmentioned keys are left intact. Triggers pod recreation.
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Env vars to merge
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_rest.EnvMergeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Merge env vars
+      tags:
+      - env
+    put:
+      consumes:
+      - application/json
+      description: Replaces the entire env list (destructive). Triggers pod recreation.
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: New env list
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_rest.EnvSetRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Replace env vars
+      tags:
+      - env
+  /api/v1/namespaces/{namespace}/agents/{name}/env/{key}:
+    delete:
+      description: Removes a single environment variable by name. Triggers pod recreation.
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Env var name to delete
+        in: path
+        name: key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Delete env var
+      tags:
+      - env
+  /api/v1/namespaces/{namespace}/agents/{name}/logs:
+    get:
+      description: Returns or streams logs from the agent's pod. Use follow=true for
+        live streaming (chunked transfer).
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - default: 100
+        description: Number of lines from the end
+        in: query
+        name: tailLines
+        type: integer
+      - description: Only lines newer than N seconds
+        in: query
+        name: sinceSeconds
+        type: integer
+      - default: agent
+        description: Container name
+        in: query
+        name: container
+        type: string
+      - default: false
+        description: Stream logs (chunked transfer)
+        in: query
+        name: follow
+        type: boolean
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: log lines
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get pod logs
+      tags:
+      - logs
+  /api/v1/namespaces/{namespace}/agents/{name}/restart:
+    post:
+      description: Forces pod recreation by bumping the orchestrator.dev/restart-at
+        annotation
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'restarted: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Restart agent
+      tags:
+      - lifecycle
+  /api/v1/namespaces/{namespace}/agents/{name}/start:
+    post:
+      description: 'Resumes a stopped agent: resets restartPolicy=Always and forces
+        pod recreation'
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'started: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Start agent
+      tags:
+      - lifecycle
+  /api/v1/namespaces/{namespace}/agents/{name}/stop:
+    post:
+      description: Sets restartPolicy=Never so the pod is not restarted after it exits
+      parameters:
+      - description: Kubernetes namespace
+        in: path
+        name: namespace
+        required: true
+        type: string
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'stopped: true'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Stop agent
+      tags:
+      - lifecycle
+  /healthz:
+    get:
+      description: Returns 200 OK if the process is alive
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: ok
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Liveness probe
+      tags:
+      - health
+  /readyz:
+    get:
+      description: Returns 200 if the Kubernetes API server is reachable, 503 otherwise
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: ready
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: k8s api not reachable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Readiness probe
+      tags:
+      - health
+schemes:
+- http
+swagger: "2.0"
+tags:
+- description: Liveness and readiness probes
+  name: health
+- description: Agent (Pod) CRUD operations
+  name: agents
+- description: Start / stop / restart agents
+  name: lifecycle
+- description: Environment variable management
+  name: env
+- description: Pod log retrieval and streaming
+  name: logs
+- description: Per-agent in-memory key-value cache
+  name: cache

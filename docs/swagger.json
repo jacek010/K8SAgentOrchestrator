@@ -1,0 +1,1503 @@
+{
+    "schemes": [
+        "http"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "REST API for managing Kubernetes Agents (pods) — lifecycle control, env patching, log streaming and per-agent cache.",
+        "title": "K8s Agent Orchestrator API",
+        "contact": {
+            "name": "Jacek Myjkowski"
+        },
+        "license": {
+            "name": "MIT"
+        },
+        "version": "1.0"
+    },
+    "host": "localhost:8082",
+    "basePath": "/",
+    "paths": {
+        "/api/v1/namespaces/{namespace}/agents": {
+            "get": {
+                "description": "Returns all Agent CRs in the given namespace",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "List agents",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "list of agents",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Creates a new Agent CR; the controller then creates a Pod for it",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Create agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Agent specification",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_rest.CreateAgentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "invalid body",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "agent already exists",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "internal error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}": {
+            "get": {
+                "description": "Returns a single Agent CR with its current status (phase, podName, conditions)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Get agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Updates Agent spec fields; only non-zero fields are applied. Triggers pod recreation.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Update agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_rest.CreateAgentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Deletes the Agent CR; the controller removes the Pod via finalizer. Also clears the in-memory cache.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Delete agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "deleted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/cache": {
+            "get": {
+                "description": "Returns all in-memory cache entries for the given agent",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cache"
+                ],
+                "summary": "List cache entries",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Removes all cache entries for the given agent",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cache"
+                ],
+                "summary": "Clear agent cache",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "cleared: true",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/cache/{field}": {
+            "get": {
+                "description": "Returns a single cache entry by field name. Returns 404 if missing or expired.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cache"
+                ],
+                "summary": "Get cache field",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cache field name",
+                        "name": "field",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Stores a value in the per-agent cache with an optional TTL. ttl_seconds=0 means no expiry.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cache"
+                ],
+                "summary": "Set cache field",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cache field name",
+                        "name": "field",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Value and optional TTL",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_rest.CacheSetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Removes a single field from the per-agent cache",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cache"
+                ],
+                "summary": "Delete cache field",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Cache field name",
+                        "name": "field",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "deleted: true",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/env": {
+            "get": {
+                "description": "Returns the current list of environment variables for the agent container",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "env"
+                ],
+                "summary": "Get env vars",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "list of EnvVar",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Replaces the entire env list (destructive). Triggers pod recreation.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "env"
+                ],
+                "summary": "Replace env vars",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New env list",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_rest.EnvSetRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Upserts env vars by name — existing keys are updated, new keys are appended, unmentioned keys are left intact. Triggers pod recreation.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "env"
+                ],
+                "summary": "Merge env vars",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Env vars to merge",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_rest.EnvMergeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/env/{key}": {
+            "delete": {
+                "description": "Removes a single environment variable by name. Triggers pod recreation.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "env"
+                ],
+                "summary": "Delete env var",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Env var name to delete",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/logs": {
+            "get": {
+                "description": "Returns or streams logs from the agent's pod. Use follow=true for live streaming (chunked transfer).",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "logs"
+                ],
+                "summary": "Get pod logs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Number of lines from the end",
+                        "name": "tailLines",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Only lines newer than N seconds",
+                        "name": "sinceSeconds",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "default": "agent",
+                        "description": "Container name",
+                        "name": "container",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Stream logs (chunked transfer)",
+                        "name": "follow",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "log lines",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/restart": {
+            "post": {
+                "description": "Forces pod recreation by bumping the orchestrator.dev/restart-at annotation",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lifecycle"
+                ],
+                "summary": "Restart agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "restarted: true",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/start": {
+            "post": {
+                "description": "Resumes a stopped agent: resets restartPolicy=Always and forces pod recreation",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lifecycle"
+                ],
+                "summary": "Start agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "started: true",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/namespaces/{namespace}/agents/{name}/stop": {
+            "post": {
+                "description": "Sets restartPolicy=Never so the pod is not restarted after it exits",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lifecycle"
+                ],
+                "summary": "Stop agent",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "stopped: true",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/healthz": {
+            "get": {
+                "description": "Returns 200 OK if the process is alive",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Liveness probe",
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/readyz": {
+            "get": {
+                "description": "Returns 200 if the Kubernetes API server is reachable, 503 otherwise",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Readiness probe",
+                "responses": {
+                    "200": {
+                        "description": "ready",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "k8s api not reachable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "internal_rest.CacheSetRequest": {
+            "type": "object",
+            "required": [
+                "value"
+            ],
+            "properties": {
+                "ttl_seconds": {
+                    "description": "0 = no expiry",
+                    "type": "integer"
+                },
+                "value": {}
+            }
+        },
+        "internal_rest.CreateAgentRequest": {
+            "type": "object",
+            "required": [
+                "image",
+                "name"
+            ],
+            "properties": {
+                "annotations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "args": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "command": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "env": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.EnvVar"
+                    }
+                },
+                "envFrom": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.EnvFromSource"
+                    }
+                },
+                "image": {
+                    "type": "string"
+                },
+                "imagePullPolicy": {
+                    "type": "string"
+                },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "podAnnotations": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "podLabels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "resources": {
+                    "$ref": "#/definitions/v1.ResourceRequirements"
+                },
+                "restartPolicy": {
+                    "type": "string"
+                },
+                "serviceAccountName": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_rest.EnvMergeRequest": {
+            "type": "object",
+            "required": [
+                "env"
+            ],
+            "properties": {
+                "env": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.EnvVar"
+                    }
+                }
+            }
+        },
+        "internal_rest.EnvSetRequest": {
+            "type": "object",
+            "required": [
+                "env"
+            ],
+            "properties": {
+                "env": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.EnvVar"
+                    }
+                }
+            }
+        },
+        "resource.Quantity": {
+            "type": "object",
+            "properties": {
+                "Format": {
+                    "type": "string",
+                    "enum": [
+                        "DecimalExponent",
+                        "BinarySI",
+                        "DecimalSI"
+                    ],
+                    "x-enum-comments": {
+                        "BinarySI": "e.g., 12Mi (12 * 2^20)",
+                        "DecimalExponent": "e.g., 12e6",
+                        "DecimalSI": "e.g., 12M  (12 * 10^6)"
+                    },
+                    "x-enum-descriptions": [
+                        "e.g., 12e6",
+                        "e.g., 12Mi (12 * 2^20)",
+                        "e.g., 12M  (12 * 10^6)"
+                    ],
+                    "x-enum-varnames": [
+                        "DecimalExponent",
+                        "BinarySI",
+                        "DecimalSI"
+                    ]
+                }
+            }
+        },
+        "v1.ConfigMapEnvSource": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "description": "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nTODO: Add other useful fields. apiVersion, kind, uid?\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\n+optional\n+default=\"\"\n+kubebuilder:default=\"\"\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+                    "type": "string"
+                },
+                "optional": {
+                    "description": "Specify whether the ConfigMap must be defined\n+optional",
+                    "type": "boolean"
+                }
+            }
+        },
+        "v1.ConfigMapKeySelector": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "description": "The key to select.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nTODO: Add other useful fields. apiVersion, kind, uid?\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\n+optional\n+default=\"\"\n+kubebuilder:default=\"\"\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+                    "type": "string"
+                },
+                "optional": {
+                    "description": "Specify whether the ConfigMap or its key must be defined\n+optional",
+                    "type": "boolean"
+                }
+            }
+        },
+        "v1.EnvFromSource": {
+            "type": "object",
+            "properties": {
+                "configMapRef": {
+                    "description": "The ConfigMap to select from\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/v1.ConfigMapEnvSource"
+                        }
+                    ]
+                },
+                "prefix": {
+                    "description": "An optional identifier to prepend to each key in the ConfigMap. Must be a C_IDENTIFIER.\n+optional",
+                    "type": "string"
+                },
+                "secretRef": {
+                    "description": "The Secret to select from\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/v1.SecretEnvSource"
+                        }
+                    ]
+                }
+            }
+        },
+        "v1.EnvVar": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "description": "Name of the environment variable. Must be a C_IDENTIFIER.",
+                    "type": "string"
+                },
+                "value": {
+                    "description": "Variable references $(VAR_NAME) are expanded\nusing the previously defined environment variables in the container and\nany service environment variables. If a variable cannot be resolved,\nthe reference in the input string will be unchanged. Double $$ are reduced\nto a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.\n\"$$(VAR_NAME)\" will produce the string literal \"$(VAR_NAME)\".\nEscaped references will never be expanded, regardless of whether the variable\nexists or not.\nDefaults to \"\".\n+optional",
+                    "type": "string"
+                },
+                "valueFrom": {
+                    "description": "Source for the environment variable's value. Cannot be used if value is not empty.\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/v1.EnvVarSource"
+                        }
+                    ]
+                }
+            }
+        },
+        "v1.EnvVarSource": {
+            "type": "object",
+            "properties": {
+                "configMapKeyRef": {
+                    "description": "Selects a key of a ConfigMap.\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/v1.ConfigMapKeySelector"
+                        }
+                    ]
+                },
+                "fieldRef": {
+                    "description": "Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['\u003cKEY\u003e']`, `metadata.annotations['\u003cKEY\u003e']`,\nspec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/v1.ObjectFieldSelector"
+                        }
+                    ]
+                },
+                "resourceFieldRef": {
+                    "description": "Selects a resource of the container: only resources limits and requests\n(limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/v1.ResourceFieldSelector"
+                        }
+                    ]
+                },
+                "secretKeyRef": {
+                    "description": "Selects a key of a secret in the pod's namespace\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/v1.SecretKeySelector"
+                        }
+                    ]
+                }
+            }
+        },
+        "v1.ObjectFieldSelector": {
+            "type": "object",
+            "properties": {
+                "apiVersion": {
+                    "description": "Version of the schema the FieldPath is written in terms of, defaults to \"v1\".\n+optional",
+                    "type": "string"
+                },
+                "fieldPath": {
+                    "description": "Path of the field to select in the specified API version.",
+                    "type": "string"
+                }
+            }
+        },
+        "v1.ResourceClaim": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "description": "Name must match the name of one entry in pod.spec.resourceClaims of\nthe Pod where this field is used. It makes that resource available\ninside a container.",
+                    "type": "string"
+                },
+                "request": {
+                    "description": "Request is the name chosen for a request in the referenced claim.\nIf empty, everything from the claim is made available, otherwise\nonly the result of this request.\n\n+optional",
+                    "type": "string"
+                }
+            }
+        },
+        "v1.ResourceFieldSelector": {
+            "type": "object",
+            "properties": {
+                "containerName": {
+                    "description": "Container name: required for volumes, optional for env vars\n+optional",
+                    "type": "string"
+                },
+                "divisor": {
+                    "description": "Specifies the output format of the exposed resources, defaults to \"1\"\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/resource.Quantity"
+                        }
+                    ]
+                },
+                "resource": {
+                    "description": "Required: resource to select",
+                    "type": "string"
+                }
+            }
+        },
+        "v1.ResourceList": {
+            "type": "object",
+            "additionalProperties": {
+                "$ref": "#/definitions/resource.Quantity"
+            }
+        },
+        "v1.ResourceRequirements": {
+            "type": "object",
+            "properties": {
+                "claims": {
+                    "description": "Claims lists the names of resources, defined in spec.resourceClaims,\nthat are used by this container.\n\nThis is an alpha field and requires enabling the\nDynamicResourceAllocation feature gate.\n\nThis field is immutable. It can only be set for containers.\n\n+listType=map\n+listMapKey=name\n+featureGate=DynamicResourceAllocation\n+optional",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/v1.ResourceClaim"
+                    }
+                },
+                "limits": {
+                    "description": "Limits describes the maximum amount of compute resources allowed.\nMore info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/v1.ResourceList"
+                        }
+                    ]
+                },
+                "requests": {
+                    "description": "Requests describes the minimum amount of compute resources required.\nIf Requests is omitted for a container, it defaults to Limits if that is explicitly specified,\notherwise to an implementation-defined value. Requests cannot exceed Limits.\nMore info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/\n+optional",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/v1.ResourceList"
+                        }
+                    ]
+                }
+            }
+        },
+        "v1.SecretEnvSource": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "description": "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nTODO: Add other useful fields. apiVersion, kind, uid?\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\n+optional\n+default=\"\"\n+kubebuilder:default=\"\"\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+                    "type": "string"
+                },
+                "optional": {
+                    "description": "Specify whether the Secret must be defined\n+optional",
+                    "type": "boolean"
+                }
+            }
+        },
+        "v1.SecretKeySelector": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "description": "The key of the secret to select from.  Must be a valid secret key.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nTODO: Add other useful fields. apiVersion, kind, uid?\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\n+optional\n+default=\"\"\n+kubebuilder:default=\"\"\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+                    "type": "string"
+                },
+                "optional": {
+                    "description": "Specify whether the Secret or its key must be defined\n+optional",
+                    "type": "boolean"
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "description": "Liveness and readiness probes",
+            "name": "health"
+        },
+        {
+            "description": "Agent (Pod) CRUD operations",
+            "name": "agents"
+        },
+        {
+            "description": "Start / stop / restart agents",
+            "name": "lifecycle"
+        },
+        {
+            "description": "Environment variable management",
+            "name": "env"
+        },
+        {
+            "description": "Pod log retrieval and streaming",
+            "name": "logs"
+        },
+        {
+            "description": "Per-agent in-memory key-value cache",
+            "name": "cache"
+        }
+    ]
+}

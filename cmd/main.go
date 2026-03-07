@@ -1,3 +1,23 @@
+// @title           K8s Agent Orchestrator API
+// @version         1.0
+// @description     REST API for managing Kubernetes Agents (pods) — lifecycle control, env patching, log streaming and per-agent cache.
+// @contact.name    Jacek Myjkowski
+// @license.name    MIT
+// @host            localhost:8082
+// @BasePath        /
+// @schemes         http
+// @tag.name         health
+// @tag.description  Liveness and readiness probes
+// @tag.name         agents
+// @tag.description  Agent (Pod) CRUD operations
+// @tag.name         lifecycle
+// @tag.description  Start / stop / restart agents
+// @tag.name         env
+// @tag.description  Environment variable management
+// @tag.name         logs
+// @tag.description  Pod log retrieval and streaming
+// @tag.name         cache
+// @tag.description  Per-agent in-memory key-value cache
 package main
 
 import (
@@ -18,6 +38,7 @@ import (
 	orchestratorv1alpha1 "github.com/jacekmyjkowski/k8s-agent-orchestrator/api/v1alpha1"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/cache"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/controller"
+	_ "github.com/jacekmyjkowski/k8s-agent-orchestrator/docs"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/rest"
 )
 

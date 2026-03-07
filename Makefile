@@ -43,6 +43,10 @@ vet: ## Run go vet
 tidy: ## Tidy go.mod (use -e to skip unreachable test-only transitive deps)
 	go mod tidy -e
 
+.PHONY: swag
+swag: ## Generate Swagger docs from annotations
+	go run github.com/swaggo/swag/cmd/swag init -g cmd/main.go --output docs --parseDependency --parseInternal
+
 # ── Docker ────────────────────────────────────────────────────────────────────
 .PHONY: docker-build
 docker-build: ## Build the Docker image
@@ -98,7 +102,7 @@ generate: ## Generate deepcopy stubs
 
 # ── Dev workflow ──────────────────────────────────────────────────────────────
 .PHONY: dev
-dev: install-crd tidy run ## Install CRD and run orchestrator locally
+dev: install-crd swag tidy run ## Install CRD, generate swagger docs and run orchestrator locally
 
 .PHONY: all
 all: fmt vet build ## Format, vet, build
