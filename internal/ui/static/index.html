@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K8s Agent Orchestrator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --border:   #2a2d3a;
+    --text:     #e2e8f0;
+    --muted:    #718096;
+    --accent:   #6366f1;
+    --accent2:  #8b5cf6;
+    --success:  #10b981;
+    --warn:     #f59e0b;
+    --danger:   #ef4444;
+    --info:     #3b82f6;
+    --stopped:  #64748b;
+    --radius:   8px;
+    --font:     'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+
+  /* ── Layout ── */
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.3px; }
+  header h1 span { color: var(--accent); }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+  .ns-label { color: var(--muted); font-size: 12px; }
+  .ns-badge {
+    background: rgba(99,102,241,.15);
+    color: var(--accent);
+    border: 1px solid rgba(99,102,241,.3);
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .refresh-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--success);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  main { flex: 1; padding: 24px; max-width: 1400px; width: 100%; margin: 0 auto; }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .toolbar-left { display: flex; gap: 10px; align-items: center; flex: 1; }
+  input[type=search] {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 12px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    width: 260px;
+    outline: none;
+    transition: border-color .15s;
+  }
+  input[type=search]:focus { border-color: var(--accent); }
+  input[type=search]::placeholder { color: var(--muted); }
+
+  .stats { display: flex; gap: 16px; }
+  .stat { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .stat strong { color: var(--text); font-size: 14px; }
+
+  /* ── Buttons ── */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: var(--radius);
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    border: none; transition: all .15s; white-space: nowrap;
+  }
+  .btn-primary  { background: var(--accent);  color: #fff; }
+  .btn-primary:hover  { background: var(--accent2); }
+  .btn-danger   { background: rgba(239,68,68,.15); color: var(--danger); border: 1px solid rgba(239,68,68,.3); }
+  .btn-danger:hover   { background: rgba(239,68,68,.25); }
+  .btn-success  { background: rgba(16,185,129,.15); color: var(--success); border: 1px solid rgba(16,185,129,.3); }
+  .btn-success:hover  { background: rgba(16,185,129,.25); }
+  .btn-warn     { background: rgba(245,158,11,.15); color: var(--warn); border: 1px solid rgba(245,158,11,.3); }
+  .btn-warn:hover     { background: rgba(245,158,11,.25); }
+  .btn-ghost    { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .btn-ghost:hover    { color: var(--text); border-color: var(--muted); }
+  .btn-info     { background: rgba(59,130,246,.15); color: var(--info); border: 1px solid rgba(59,130,246,.3); }
+  .btn-info:hover     { background: rgba(59,130,246,.25); }
+  .btn-sm       { padding: 4px 10px; font-size: 12px; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+  /* ── Table ── */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead { background: rgba(255,255,255,.02); }
+  th {
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+  td { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .row-stopped { opacity: .6; }
+
+  .agent-name { font-weight: 500; cursor: pointer; color: var(--accent); }
+  .agent-name:hover { text-decoration: underline; }
+
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 20px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .3px;
+  }
+  .badge-running  { background: rgba(16,185,129,.15); color: var(--success); border: 1px solid rgba(16,185,129,.25); }
+  .badge-stopped  { background: rgba(100,116,139,.15); color: var(--stopped); border: 1px solid rgba(100,116,139,.25); }
+  .badge-pending  { background: rgba(245,158,11,.15); color: var(--warn); border: 1px solid rgba(245,158,11,.25); }
+  .badge-failed   { background: rgba(239,68,68,.15); color: var(--danger); border: 1px solid rgba(239,68,68,.25); }
+  .badge-updating { background: rgba(59,130,246,.15); color: var(--info); border: 1px solid rgba(59,130,246,.25); }
+  .badge-restoring{ background: rgba(139,92,246,.15); color: var(--accent2); border: 1px solid rgba(139,92,246,.25); }
+  .badge-idle     { background: rgba(245,158,11,.12); color: var(--warn); border: 1px solid rgba(245,158,11,.2); font-size: 10px; }
+
+  .img-cell { font-family: monospace; font-size: 12px; color: var(--muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pod-cell { font-family: monospace; font-size: 12px; color: var(--muted); }
+  .actions-cell { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .age-cell { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+  .empty-state { padding: 48px; text-align: center; color: var(--muted); }
+  .empty-state p { margin-top: 8px; font-size: 13px; }
+
+  /* ── Modal ── */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.7);
+    backdrop-filter: blur(4px);
+    z-index: 200;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    animation: fadeIn .15s ease;
+  }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    display: flex; flex-direction: column;
+    animation: slideUp .15s ease;
+  }
+  .modal-lg { max-width: 760px; }
+  @keyframes slideUp { from{transform:translateY(12px);opacity:0} to{transform:translateY(0);opacity:1} }
+  .modal-header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .modal-header h2 { font-size: 16px; font-weight: 600; flex: 1; }
+  .modal-body { padding: 20px 24px; overflow-y: auto; flex: 1; }
+  .modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+
+  /* ── Form ── */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-full { grid-column: 1 / -1; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; }
+  label { font-size: 12px; font-weight: 500; color: var(--muted); }
+  input[type=text], input[type=number], select, textarea {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 11px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    width: 100%;
+    transition: border-color .15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  input::placeholder, textarea::placeholder { color: var(--muted); }
+  textarea { resize: vertical; min-height: 70px; }
+  select option { background: var(--surface); }
+  .hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .form-check { display: flex; align-items: center; gap: 8px; }
+  .form-check input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
+  .form-check label { font-size: 13px; color: var(--text); font-weight: 400; }
+
+  /* ── Detail modal ── */
+  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+  .detail-item label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+  .detail-item p { margin-top: 3px; font-size: 13px; font-family: monospace; }
+
+  /* ── History ── */
+  .history-list { display: flex; flex-direction: column; gap: 0; }
+  .history-item {
+    display: grid;
+    grid-template-columns: 140px 80px 100px 1fr;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    align-items: start;
+    font-size: 12px;
+  }
+  .history-item:last-child { border-bottom: none; }
+  .history-time { color: var(--muted); font-family: monospace; }
+  .history-reason { font-weight: 600; color: var(--text); }
+  .history-msg { color: var(--muted); word-break: break-word; }
+  .history-type-Normal  { color: var(--success); }
+  .history-type-Warning { color: var(--danger); }
+
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .tab {
+    padding: 8px 16px; font-size: 13px; cursor: pointer;
+    color: var(--muted); border-bottom: 2px solid transparent;
+    transition: all .15s; margin-bottom: -1px;
+  }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ── Env editor ── */
+  .env-list { display: flex; flex-direction: column; gap: 8px; }
+  .env-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; }
+  .env-row .btn-sm { padding: 6px 8px; }
+
+  /* ── Toast ── */
+  .toasts { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 500; }
+  .toast {
+    padding: 10px 16px; border-radius: var(--radius);
+    font-size: 13px; font-weight: 500;
+    animation: slideIn .2s ease;
+    min-width: 220px; max-width: 340px;
+  }
+  @keyframes slideIn { from{transform:translateX(20px);opacity:0} to{transform:translateX(0);opacity:1} }
+  .toast-ok      { background: rgba(16,185,129,.2); border: 1px solid rgba(16,185,129,.4); color: var(--success); }
+  .toast-err     { background: rgba(239,68,68,.2); border: 1px solid rgba(239,68,68,.4); color: var(--danger); }
+  .toast-info    { background: rgba(99,102,241,.2); border: 1px solid rgba(99,102,241,.4); color: var(--accent); }
+
+  .section-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+  code { font-family: monospace; font-size: 12px; background: rgba(255,255,255,.06); padding: 1px 5px; border-radius: 4px; }
+
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,.2);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+  }
+  @keyframes spin { to{transform: rotate(360deg)} }
+
+  .close-btn { background: none; border: none; color: var(--muted); cursor: pointer; padding: 4px; border-radius: 4px; }
+  .close-btn:hover { color: var(--text); background: rgba(255,255,255,.08); }
+  .close-btn svg { display: block; }
+
+  /* ── Keepalive indicator ── */
+  .svc-url { font-family: monospace; font-size: 11px; color: var(--muted); word-break: break-all; }
+  .keepalive-result { margin-top: 12px; padding: 12px; background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border); }
+  .keepalive-result p { margin-bottom: 4px; font-size: 13px; }
+  .keepalive-result p:last-child { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── Header ──────────────────────────────────────────────── -->
+<header>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+  </svg>
+  <h1>K8s Agent <span>Orchestrator</span></h1>
+  <div class="header-right">
+    <span class="ns-label">namespace</span>
+    <span class="ns-badge" id="ns-badge">default</span>
+    <div class="refresh-dot" title="Auto-refreshing every 5s"></div>
+  </div>
+</header>
+
+<!-- ── Main ─────────────────────────────────────────────────── -->
+<main>
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <input type="search" id="search" placeholder="Search agents…" oninput="renderTable()">
+      <div class="stats">
+        <div class="stat"><strong id="stat-total">0</strong> total</div>
+        <div class="stat"><strong id="stat-running" style="color:var(--success)">0</strong> running</div>
+        <div class="stat"><strong id="stat-stopped" style="color:var(--stopped)">0</strong> stopped</div>
+        <div class="stat"><strong id="stat-other" style="color:var(--warn)">0</strong> other</div>
+      </div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="loadAgents()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+      Refresh
+    </button>
+    <button class="btn btn-primary" onclick="openCreateModal()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+      New Agent
+    </button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Phase</th>
+          <th>Pod</th>
+          <th>Image</th>
+          <th>Service</th>
+          <th>Idle</th>
+          <th>Age</th>
+          <th style="text-align:right">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="agents-body">
+        <tr><td colspan="8" class="empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+</div><!-- .app -->
+
+<!-- ── Toasts ────────────────────────────────────────────────── -->
+<div class="toasts" id="toasts"></div>
+
+<!-- ── Create / Edit Modal ──────────────────────────────────── -->
+<div id="create-modal" class="overlay" style="display:none" onclick="overlayClose(event,'create-modal')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2 id="create-title">New Agent</h2>
+      <button class="close-btn" onclick="closeModal('create-modal')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Name *</label>
+          <input type="text" id="f-name" placeholder="my-agent">
+        </div>
+        <div class="form-group">
+          <label>Image *</label>
+          <input type="text" id="f-image" placeholder="busybox:1.36">
+        </div>
+        <div class="form-group">
+          <label>Command</label>
+          <input type="text" id="f-command" placeholder='sh,-c,while true; do echo hi; sleep 5; done'>
+          <span class="hint">Comma-separated</span>
+        </div>
+        <div class="form-group">
+          <label>Args</label>
+          <input type="text" id="f-args" placeholder="arg1,arg2">
+          <span class="hint">Comma-separated</span>
+        </div>
+        <div class="form-group">
+          <label>Image Pull Policy</label>
+          <select id="f-pullpolicy">
+            <option value="">Default (IfNotPresent)</option>
+            <option value="Always">Always</option>
+            <option value="IfNotPresent">IfNotPresent</option>
+            <option value="Never">Never</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Restart Policy</label>
+          <select id="f-restartpolicy">
+            <option value="Always">Always</option>
+            <option value="OnFailure">OnFailure</option>
+            <option value="Never">Never</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Service Port</label>
+          <input type="number" id="f-serviceport" placeholder="0 (disabled)" min="0" max="65535">
+        </div>
+        <div class="form-group">
+          <label>Idle Timeout (seconds)</label>
+          <input type="number" id="f-idletimeout" placeholder="0 (use global)" min="0">
+        </div>
+        <div class="form-group form-full">
+          <label>Environment Variables (KEY=VALUE, one per line)</label>
+          <textarea id="f-env" rows="4" placeholder="LOG_LEVEL=debug&#10;REGION=eu-west-1"></textarea>
+        </div>
+        <div class="form-group">
+          <label>CPU Request</label>
+          <input type="text" id="f-cpu-req" placeholder="50m">
+        </div>
+        <div class="form-group">
+          <label>Memory Request</label>
+          <input type="text" id="f-mem-req" placeholder="64Mi">
+        </div>
+        <div class="form-group">
+          <label>CPU Limit</label>
+          <input type="text" id="f-cpu-lim" placeholder="200m">
+        </div>
+        <div class="form-group">
+          <label>Memory Limit</label>
+          <input type="text" id="f-mem-lim" placeholder="128Mi">
+        </div>
+        <div class="form-check form-full">
+          <input type="checkbox" id="f-selfhealing">
+          <label for="f-selfhealing">Disable self-healing (agent won't be resurrected after external deletion)</label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('create-modal')">Cancel</button>
+      <button class="btn btn-primary" id="create-submit-btn" onclick="submitCreate()">Create Agent</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Detail Modal ──────────────────────────────────────────── -->
+<div id="detail-modal" class="overlay" style="display:none" onclick="overlayClose(event,'detail-modal')">
+  <div class="modal modal-lg" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2 id="detail-title">Agent</h2>
+      <button class="close-btn" onclick="closeModal('detail-modal')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab('overview')">Overview</div>
+        <div class="tab" onclick="switchTab('history')">History</div>
+        <div class="tab" onclick="switchTab('keepalive')">Keepalive</div>
+      </div>
+
+      <!-- Overview tab -->
+      <div id="tab-overview" class="tab-content active">
+        <div class="detail-grid" id="detail-grid"></div>
+        <div class="section-title">Actions</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap" id="detail-actions"></div>
+      </div>
+
+      <!-- History tab -->
+      <div id="tab-history" class="tab-content">
+        <div class="history-list" id="history-list">
+          <p style="color:var(--muted); font-size:13px">No history yet.</p>
+        </div>
+      </div>
+
+      <!-- Keepalive tab -->
+      <div id="tab-keepalive" class="tab-content">
+        <p style="color:var(--muted); font-size:13px; margin-bottom:16px">
+          Wakes the agent if paused, resets the idle timer, and returns the Service URL for direct A2A communication.
+        </p>
+        <div class="form-group" style="max-width:200px; margin-bottom:16px">
+          <label>Wait timeout (seconds)</label>
+          <input type="number" id="ka-wait" value="30" min="0" max="120">
+        </div>
+        <button class="btn btn-info" onclick="doKeepalive()" id="ka-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          Send Keepalive
+        </button>
+        <div id="ka-result" class="keepalive-result" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Confirm Modal ─────────────────────────────────────────── -->
+<div id="confirm-modal" class="overlay" style="display:none" onclick="overlayClose(event,'confirm-modal')">
+  <div class="modal" style="max-width:400px" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2 id="confirm-title">Confirm</h2>
+      <button class="close-btn" onclick="closeModal('confirm-modal')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <p id="confirm-msg" style="color:var(--muted);font-size:14px"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('confirm-modal')">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ok" onclick="">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────
+const API = 'http://localhost:8082/api/v1';
+let agents = [];
+let currentAgent = null;
+let refreshTimer = null;
+
+// ── Bootstrap ───────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  loadAgents();
+  refreshTimer = setInterval(loadAgents, 5000);
+});
+
+// ── API helpers ─────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  const json = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(json.message || json.data?.message || `HTTP ${r.status}`);
+  return json.data ?? json;
+}
+
+// ── Data loading ─────────────────────────────────────────────────────────
+async function loadAgents() {
+  try {
+    const data = await api('/agents');
+    agents = Array.isArray(data) ? data : [];
+    renderTable();
+    updateStats();
+    if (currentAgent) refreshDetail(currentAgent.metadata?.name);
+  } catch(e) {
+    // silent — keeps old data visible
+  }
+}
+
+function updateStats() {
+  document.getElementById('stat-total').textContent   = agents.length;
+  document.getElementById('stat-running').textContent = agents.filter(a => a.status?.phase === 'Running').length;
+  document.getElementById('stat-stopped').textContent = agents.filter(a => a.status?.phase === 'Stopped').length;
+  document.getElementById('stat-other').textContent   = agents.filter(a => !['Running','Stopped',''].includes(a.status?.phase ?? '')).length;
+}
+
+// ── Table rendering ──────────────────────────────────────────────────────
+function renderTable() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const filtered = agents.filter(a => !q || a.metadata?.name?.includes(q) || a.spec?.image?.includes(q));
+  const tbody = document.getElementById('agents-body');
+
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.3;margin:0 auto 8px;display:block"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      <p>${q ? 'No agents match your search.' : 'No agents yet. Create your first agent.'}</p>
+    </td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map(a => {
+    const name      = a.metadata?.name ?? '';
+    const phase     = a.status?.phase ?? 'Unknown';
+    const pod       = a.status?.podName ?? '—';
+    const image     = a.spec?.image ?? '';
+    const svcName   = a.status?.serviceName ?? '';
+    const svcPort   = a.spec?.servicePort ?? 0;
+    const idle      = a.spec?.idleTimeout ?? 0;
+    const age       = fmtAge(a.metadata?.creationTimestamp);
+    const stopped   = phase === 'Stopped';
+
+    return `<tr class="${stopped ? 'row-stopped' : ''}">
+      <td><span class="agent-name" onclick="openDetail('${name}')">${name}</span></td>
+      <td>${phaseBadge(phase)}</td>
+      <td><span class="pod-cell">${pod}</span></td>
+      <td><span class="img-cell" title="${escHtml(image)}">${escHtml(image)}</span></td>
+      <td>${svcPort > 0 ? `<code>${svcName || name}:${svcPort}</code>` : '<span style="color:var(--muted)">—</span>'}</td>
+      <td>${idle > 0 ? `<span class="badge badge-idle">${fmtDuration(idle)}</span>` : '<span style="color:var(--muted)">—</span>'}</td>
+      <td class="age-cell">${age}</td>
+      <td>
+        <div class="actions-cell" style="justify-content:flex-end">
+          ${stopped
+            ? `<button class="btn btn-success btn-sm" onclick="agentAction('start','${name}')" title="Start">▶ Start</button>`
+            : `<button class="btn btn-warn btn-sm" onclick="agentAction('stop','${name}')" title="Stop">⏹ Stop</button>`}
+          <button class="btn btn-ghost btn-sm" onclick="agentAction('restart','${name}')" title="Restart" ${stopped?'disabled':''}>↺</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDelete('${name}')">✕</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function phaseBadge(phase) {
+  const map = { Running:'running', Stopped:'stopped', Pending:'pending', Failed:'failed', Updating:'updating', Restoring:'restoring' };
+  const cls = map[phase] ?? 'pending';
+  return `<span class="badge badge-${cls}">${phase}</span>`;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function fmtAge(ts) {
+  if (!ts) return '—';
+  const s = Math.floor((Date.now() - new Date(ts)) / 1000);
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m`;
+  if (s < 86400) return `${Math.floor(s/3600)}h`;
+  return `${Math.floor(s/86400)}d`;
+}
+
+function fmtDuration(sec) {
+  if (sec < 60) return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec/60)}m`;
+  return `${Math.floor(sec/3600)}h`;
+}
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleString();
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────
+async function agentAction(action, name) {
+  try {
+    await api(`/agents/${name}/${action}`, { method: 'POST' });
+    toast(`${capitalize(action)}: ${name}`, 'ok');
+    loadAgents();
+  } catch(e) {
+    toast(e.message, 'err');
+  }
+}
+
+function confirmDelete(name) {
+  document.getElementById('confirm-title').textContent = 'Delete Agent';
+  document.getElementById('confirm-msg').textContent = `Permanently delete "${name}" and its Pod?`;
+  const btn = document.getElementById('confirm-ok');
+  btn.onclick = async () => {
+    closeModal('confirm-modal');
+    try {
+      await api(`/agents/${name}`, { method: 'DELETE' });
+      toast(`Deleted: ${name}`, 'ok');
+      if (currentAgent?.metadata?.name === name) closeModal('detail-modal');
+      loadAgents();
+    } catch(e) {
+      toast(e.message, 'err');
+    }
+  };
+  openModal('confirm-modal');
+}
+
+// ── Create Agent ─────────────────────────────────────────────────────────
+function openCreateModal() {
+  // reset form
+  ['f-name','f-image','f-command','f-args','f-env','f-cpu-req','f-mem-req','f-cpu-lim','f-mem-lim'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('f-pullpolicy').value    = '';
+  document.getElementById('f-restartpolicy').value = 'Always';
+  document.getElementById('f-serviceport').value   = '';
+  document.getElementById('f-idletimeout').value   = '';
+  document.getElementById('f-selfhealing').checked = false;
+  document.getElementById('create-title').textContent     = 'New Agent';
+  document.getElementById('create-submit-btn').textContent = 'Create Agent';
+  openModal('create-modal');
+}
+
+async function submitCreate() {
+  const name = document.getElementById('f-name').value.trim();
+  const image = document.getElementById('f-image').value.trim();
+  if (!name || !image) { toast('Name and Image are required', 'err'); return; }
+
+  const body = {
+    name, image,
+    imagePullPolicy: document.getElementById('f-pullpolicy').value || undefined,
+    restartPolicy:   document.getElementById('f-restartpolicy').value || undefined,
+    servicePort:     parseInt(document.getElementById('f-serviceport').value) || 0,
+    idleTimeout:     parseInt(document.getElementById('f-idletimeout').value) || 0,
+    selfHealingDisabled: document.getElementById('f-selfhealing').checked,
+  };
+
+  // Command & Args
+  const cmd = document.getElementById('f-command').value.trim();
+  if (cmd) body.command = cmd.split(',').map(s => s.trim()).filter(Boolean);
+  const args = document.getElementById('f-args').value.trim();
+  if (args) body.args = args.split(',').map(s => s.trim()).filter(Boolean);
+
+  // Env
+  const envRaw = document.getElementById('f-env').value.trim();
+  if (envRaw) {
+    body.env = envRaw.split('\n').filter(Boolean).map(line => {
+      const idx = line.indexOf('=');
+      return { name: line.slice(0, idx), value: line.slice(idx + 1) };
+    });
+  }
+
+  // Resources
+  const cpuReq = document.getElementById('f-cpu-req').value.trim();
+  const memReq = document.getElementById('f-mem-req').value.trim();
+  const cpuLim = document.getElementById('f-cpu-lim').value.trim();
+  const memLim = document.getElementById('f-mem-lim').value.trim();
+  if (cpuReq || memReq || cpuLim || memLim) {
+    body.resources = {};
+    if (cpuReq || memReq) {
+      body.resources.requests = {};
+      if (cpuReq) body.resources.requests.cpu = cpuReq;
+      if (memReq) body.resources.requests.memory = memReq;
+    }
+    if (cpuLim || memLim) {
+      body.resources.limits = {};
+      if (cpuLim) body.resources.limits.cpu = cpuLim;
+      if (memLim) body.resources.limits.memory = memLim;
+    }
+  }
+
+  const btn = document.getElementById('create-submit-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Creating…';
+
+  try {
+    await api('/agents', { method: 'POST', body: JSON.stringify(body) });
+    toast(`Agent "${name}" created`, 'ok');
+    closeModal('create-modal');
+    loadAgents();
+  } catch(e) {
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create Agent';
+  }
+}
+
+// ── Detail Modal ──────────────────────────────────────────────────────────
+async function openDetail(name) {
+  switchTab('overview');
+  document.getElementById('detail-title').textContent = name;
+  document.getElementById('ka-result').style.display = 'none';
+  openModal('detail-modal');
+  await refreshDetail(name);
+}
+
+async function refreshDetail(name) {
+  try {
+    const a = await api(`/agents/${name}`);
+    currentAgent = a;
+    renderOverview(a);
+    renderHistory(a);
+  } catch(e) {
+    // agent gone
+  }
+}
+
+function renderOverview(a) {
+  const phase   = a.status?.phase ?? '—';
+  const grid    = document.getElementById('detail-grid');
+  const svcPort = a.spec?.servicePort ?? 0;
+  const svcName = a.status?.serviceName ?? a.metadata?.name;
+  const idle    = a.spec?.idleTimeout ?? 0;
+
+  grid.innerHTML = `
+    <div class="detail-item"><label>Name</label><p>${escHtml(a.metadata?.name)}</p></div>
+    <div class="detail-item"><label>Namespace</label><p>${escHtml(a.metadata?.namespace)}</p></div>
+    <div class="detail-item"><label>Phase</label><p>${phaseBadge(phase)}</p></div>
+    <div class="detail-item"><label>Pod</label><p>${a.status?.podName ?? '—'}</p></div>
+    <div class="detail-item"><label>Image</label><p>${escHtml(a.spec?.image ?? '')}</p></div>
+    <div class="detail-item"><label>Restart Policy</label><p>${a.spec?.restartPolicy ?? 'Always'}</p></div>
+    <div class="detail-item"><label>Self-healing</label><p>${a.spec?.selfHealingDisabled ? '❌ Disabled' : '✅ Enabled'}</p></div>
+    <div class="detail-item"><label>Paused</label><p>${a.spec?.paused ? 'Yes' : 'No'}</p></div>
+    <div class="detail-item"><label>Service Port</label><p>${svcPort > 0 ? `${svcPort} · <code>${svcName}</code>` : '—'}</p></div>
+    <div class="detail-item"><label>Idle Timeout</label><p>${idle > 0 ? fmtDuration(idle) : '—'}</p></div>
+    <div class="detail-item"><label>Created</label><p>${fmtTime(a.metadata?.creationTimestamp)}</p></div>
+    <div class="detail-item"><label>Message</label><p style="color:var(--muted)">${escHtml(a.status?.message ?? '—')}</p></div>
+    ${svcPort > 0 ? `<div class="detail-item" style="grid-column:1/-1"><label>Service URL</label><p class="svc-url">http://${escHtml(svcName)}.${escHtml(a.metadata?.namespace ?? 'default')}.svc.cluster.local:${svcPort}</p></div>` : ''}
+  `;
+
+  const stopped = phase === 'Stopped';
+  const paused  = a.spec?.paused;
+  const name    = a.metadata?.name;
+  const actions = document.getElementById('detail-actions');
+  actions.innerHTML = `
+    ${!paused ? `<button class="btn btn-warn" onclick="agentAction('stop','${name}')">⏹ Stop</button>` : ''}
+    ${paused  ? `<button class="btn btn-success" onclick="agentAction('start','${name}')">▶ Start</button>` : ''}
+    <button class="btn btn-ghost" onclick="agentAction('restart','${name}')" ${stopped?'disabled':''}>↺ Restart</button>
+    <button class="btn btn-ghost" onclick="agentAction('disable-healing','${name}')" ${a.spec?.selfHealingDisabled?'disabled':''}>🛡 Disable healing</button>
+    <button class="btn btn-ghost" onclick="agentAction('enable-healing','${name}')" ${!a.spec?.selfHealingDisabled?'disabled':''}>🛡 Enable healing</button>
+    <button class="btn btn-danger" onclick="closeModal('detail-modal');confirmDelete('${name}')">✕ Delete</button>
+  `;
+}
+
+function renderHistory(a) {
+  const list = document.getElementById('history-list');
+  const hist = a.status?.history ?? [];
+  if (!hist.length) {
+    list.innerHTML = '<p style="color:var(--muted); font-size:13px">No history entries.</p>';
+    return;
+  }
+  list.innerHTML = [...hist].reverse().map(e => `
+    <div class="history-item">
+      <span class="history-time">${fmtTime(e.time)}</span>
+      <span class="history-type-${e.type ?? 'Normal'}">${e.type ?? ''}</span>
+      <span class="history-reason">${escHtml(e.reason ?? '')}</span>
+      <span class="history-msg">${escHtml(e.message ?? '')}</span>
+    </div>
+  `).join('');
+}
+
+// ── Keepalive ─────────────────────────────────────────────────────────────
+async function doKeepalive() {
+  if (!currentAgent) return;
+  const name = currentAgent.metadata?.name ?? '';
+  const wait = document.getElementById('ka-wait').value || 30;
+  const btn  = document.getElementById('ka-btn');
+  const res  = document.getElementById('ka-result');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Sending…';
+  res.style.display = 'none';
+  try {
+    const data = await api(`/agents/${name}/keepalive?wait=${wait}`, { method: 'POST' });
+    const statusColor = data.status === 'running' ? 'var(--success)' : data.status === 'starting' ? 'var(--warn)' : 'var(--muted)';
+    res.style.display = 'block';
+    res.innerHTML = `
+      <p><strong>Status:</strong> <span style="color:${statusColor}">${escHtml(data.status ?? '—')}</span></p>
+      <p><strong>Phase:</strong> ${escHtml(data.phase ?? '—')}</p>
+      <p><strong>Elapsed:</strong> ${escHtml(data.elapsed ?? '—')}</p>
+      ${data.svcUrl ? `<p><strong>SVC URL:</strong></p><p class="svc-url" style="margin-top:4px">${escHtml(data.svcUrl)}</p>` : ''}
+    `;
+    toast(`Keepalive: ${data.status}`, 'ok');
+    loadAgents();
+  } catch(e) {
+    toast(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Send Keepalive`;
+  }
+}
+
+// ── Modal helpers ─────────────────────────────────────────────────────────
+function openModal(id) {
+  document.getElementById(id).style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+function closeModal(id) {
+  document.getElementById(id).style.display = 'none';
+  document.body.style.overflow = '';
+  if (id === 'detail-modal') currentAgent = null;
+}
+function overlayClose(e, id) {
+  if (e.target.classList.contains('overlay')) closeModal(id);
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const names = ['overview','history','keepalive'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  ['tab-overview','tab-history','tab-keepalive'].forEach(id => {
+    document.getElementById(id).classList.toggle('active', id === `tab-${name}`);
+  });
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+</script>
+</body>
+</html>

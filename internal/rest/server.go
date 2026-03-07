@@ -45,6 +45,7 @@ func NewServer(
 
 	engine := gin.New()
 	engine.Use(gin.Recovery())
+	engine.Use(corsMiddleware())
 	engine.Use(loggerMiddleware())
 
 	s := &Server{
@@ -134,6 +135,22 @@ func (s *Server) registerAgentRoutes(agents *gin.RouterGroup) {
 	named.PUT("/cache/:field", s.handleSetCacheField)
 	named.DELETE("/cache/:field", s.handleDeleteCacheField)
 	named.DELETE("/cache", s.handleClearCache)
+}
+
+// corsMiddleware adds CORS headers so browser-based clients (e.g. the web UI
+// served on a different port) can call the REST API.
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+		c.Header("Access-Control-Max-Age", "86400")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	}
 }
 
 // loggerMiddleware is a minimal structured logger.

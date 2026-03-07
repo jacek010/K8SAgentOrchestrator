@@ -26,6 +26,8 @@ import (
 	"time"
 
 	// Import all Kubernetes client auth plugins.
+	"net/http"
+
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -42,6 +44,7 @@ import (
 	_ "github.com/jacekmyjkowski/k8s-agent-orchestrator/docs"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/idle"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/rest"
+	uiserver "github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/ui"
 )
 
 var (
@@ -64,6 +67,7 @@ func main() {
 		debug                bool
 		idleTimeoutDefault   int
 		idleCheckInterval    int
+		uiAddr               string
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Address to bind the metrics endpoint.")
@@ -74,6 +78,7 @@ func main() {
 	flag.BoolVar(&debug, "debug", false, "Enable debug logging and Gin debug mode.")
 	flag.IntVar(&idleTimeoutDefault, "idle-timeout-default", 0, "Global idle timeout in seconds. 0 disables idle tracking unless overridden per-agent via spec.idleTimeout.")
 	flag.IntVar(&idleCheckInterval, "idle-check-interval", 30, "How often (in seconds) the idle watcher checks all agents.")
+	flag.StringVar(&uiAddr, "ui-bind-address", ":8083", "Address to bind the web UI dashboard.")
 	flag.Parse()
 
 	// Read override from env (useful inside pod via Helm values).
@@ -140,6 +145,14 @@ func main() {
 		if err := restServer.Run(restAddr); err != nil {
 			setupLog.Error(err, "REST API server error")
 			os.Exit(1)
+		}
+	}()
+
+	// ── Web UI Server ────────────────────────────────────────────────────────
+	go func() {
+		setupLog.Info("Starting web UI", "addr", uiAddr)
+		if err := http.ListenAndServe(uiAddr, uiserver.NewHandler()); err != nil {
+			setupLog.Error(err, "Web UI server error")
 		}
 	}()
 
