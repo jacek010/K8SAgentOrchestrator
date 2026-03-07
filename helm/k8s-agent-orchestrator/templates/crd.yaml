@@ -1,0 +1,7 @@
+{{/*
+The Agent CRD is installed via the crds/ directory (Helm installs it before templates).
+This file is intentionally left empty.
+
+To skip CRD installation (e.g. when managing CRDs externally), remove the crds/ directory
+or use `--skip-crds` flag with helm install/upgrade.
+*/}}

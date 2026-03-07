@@ -1,0 +1,17 @@
+apiVersion: v2
+name: k8s-agent-orchestrator
+description: |
+  Namespaced Kubernetes Agent Orchestrator – manages pod lifecycle via CRD and exposes a REST API.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - orchestrator
+  - agents
+  - kubernetes
+  - pods
+home: https://github.com/jacekmyjkowski/k8s-agent-orchestrator
+sources:
+  - https://github.com/jacekmyjkowski/k8s-agent-orchestrator
+maintainers:
+  - name: jacekmyjkowski

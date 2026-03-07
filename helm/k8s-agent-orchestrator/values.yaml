@@ -1,0 +1,111 @@
+# Default values for k8s-agent-orchestrator.
+
+# -- Number of orchestrator replicas. Keep at 1 unless leaderElect is enabled.
+replicaCount: 1
+
+image:
+  # -- Container image repository.
+  repository: ghcr.io/jacekmyjkowski/k8s-agent-orchestrator
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+  # -- Image tag. Defaults to Chart appVersion.
+  tag: ""
+
+# -- Image pull secrets.
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Namespace to watch for Agent resources. Defaults to Release namespace.
+watchNamespace: ""
+
+# -- Enable leader election (required for >1 replica).
+leaderElect: false
+
+# -- Enable debug logging.
+debug: false
+
+serviceAccount:
+  # -- Specifies whether a ServiceAccount should be created.
+  create: true
+  # -- Annotations to add to the ServiceAccount.
+  annotations: {}
+  # -- The name of the ServiceAccount. If empty, generated from chart fullname.
+  name: ""
+
+# -- Annotations to add to the orchestrator Pod.
+podAnnotations: {}
+
+# -- Labels to add to the orchestrator Pod.
+podLabels: {}
+
+# -- Security context for the orchestrator Pod.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  fsGroup: 65532
+
+# -- Security context for the orchestrator container.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  # -- Service type for the REST API.
+  type: ClusterIP
+  # -- REST API port.
+  restPort: 8082
+  # -- Metrics port.
+  metricsPort: 8080
+
+# -- Resource limits and requests for the orchestrator container.
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# -- Liveness probe configuration.
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: health
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+# -- Readiness probe configuration.
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: health
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+# -- Node selector for the orchestrator Pod.
+nodeSelector: {}
+
+# -- Tolerations for the orchestrator Pod.
+tolerations: []
+
+# -- Affinity for the orchestrator Pod.
+affinity: {}
+
+# -- Install the Agent CRD. Set to false if managing CRDs externally.
+installCRD: true
+
+rbac:
+  # -- Create Role and RoleBinding. Required for namespaced operation.
+  create: true
+  # -- Additional rules to append to the Role.
+  extraRules: []
+  # Example:
+  # extraRules:
+  #   - apiGroups: [""]
+  #     resources: ["secrets"]
+  #     verbs: ["get", "list"]

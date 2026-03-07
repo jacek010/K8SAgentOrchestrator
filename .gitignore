@@ -1,0 +1,62 @@
+# ── Binary output ─────────────────────────────────────────────────────────────
+bin/
+dist/
+
+# ── Go ────────────────────────────────────────────────────────────────────────
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file (local only)
+go.work
+go.work.sum
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+.docker/
+
+# ── Kubernetes / kubeconfig ───────────────────────────────────────────────────
+kubeconfig
+kubeconfig.yaml
+*.kubeconfig
+.kube/
+
+# ── Helm ──────────────────────────────────────────────────────────────────────
+# Generated chart archives
+*.tgz
+helm/*/charts/
+helm/*/.helmignore
+
+# ── IDE / editors ─────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Secrets / credentials ─────────────────────────────────────────────────────
+*.pem
+*.key
+*.crt
+*.p12
+.env
+.env.*
+!.env.example
+
+# ── Test / coverage ───────────────────────────────────────────────────────────
+coverage.out
+coverage.html
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
