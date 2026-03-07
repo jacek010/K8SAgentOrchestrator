@@ -20,7 +20,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/v1/namespaces/{namespace}/agents": {
+        "/api/v1/agents": {
             "get": {
                 "description": "Returns all Agent CRs in the given namespace",
                 "produces": [
@@ -30,15 +30,6 @@ const docTemplate = `{
                     "agents"
                 ],
                 "summary": "List agents",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "list of agents",
@@ -71,13 +62,6 @@ const docTemplate = `{
                 ],
                 "summary": "Create agent",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "description": "Agent specification",
                         "name": "body",
@@ -126,7 +110,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/services": {
+        "/api/v1/agents/services": {
             "get": {
                 "description": "Returns the ClusterIP DNS URL for every Agent that has a ServicePort configured",
                 "produces": [
@@ -136,15 +120,6 @@ const docTemplate = `{
                     "agents"
                 ],
                 "summary": "List agent service URLs",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
                 "responses": {
                     "200": {
                         "description": "list of agent service URLs",
@@ -165,7 +140,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}": {
+        "/api/v1/agents/{name}": {
             "get": {
                 "description": "Returns a single Agent CR with its current status (phase, podName, conditions)",
                 "produces": [
@@ -176,13 +151,6 @@ const docTemplate = `{
                 ],
                 "summary": "Get agent",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -232,13 +200,6 @@ const docTemplate = `{
                 ],
                 "summary": "Update agent",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -305,13 +266,6 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Agent name",
                         "name": "name",
                         "in": "path",
@@ -349,7 +303,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/cache": {
+        "/api/v1/agents/{name}/cache": {
             "get": {
                 "description": "Returns all in-memory cache entries for the given agent",
                 "produces": [
@@ -360,13 +314,6 @@ const docTemplate = `{
                 ],
                 "summary": "List cache entries",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -397,13 +344,6 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Agent name",
                         "name": "name",
                         "in": "path",
@@ -421,7 +361,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/cache/{field}": {
+        "/api/v1/agents/{name}/cache/{field}": {
             "get": {
                 "description": "Returns a single cache entry by field name. Returns 404 if missing or expired.",
                 "produces": [
@@ -432,13 +372,6 @@ const docTemplate = `{
                 ],
                 "summary": "Get cache field",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -486,13 +419,6 @@ const docTemplate = `{
                 ],
                 "summary": "Set cache field",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -548,13 +474,6 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Agent name",
                         "name": "name",
                         "in": "path",
@@ -579,7 +498,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/disable-healing": {
+        "/api/v1/agents/{name}/disable-healing": {
             "post": {
                 "description": "Sets spec.selfHealingDisabled=true. The Agent CR will NOT be recreated automatically when deleted externally.",
                 "produces": [
@@ -590,13 +509,6 @@ const docTemplate = `{
                 ],
                 "summary": "Disable self-healing",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -634,7 +546,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/enable-healing": {
+        "/api/v1/agents/{name}/enable-healing": {
             "post": {
                 "description": "Sets spec.selfHealingDisabled=false. The Agent CR will be automatically recreated when deleted externally (this is the default behaviour).",
                 "produces": [
@@ -645,13 +557,6 @@ const docTemplate = `{
                 ],
                 "summary": "Enable self-healing",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -689,7 +594,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/env": {
+        "/api/v1/agents/{name}/env": {
             "get": {
                 "description": "Returns the current list of environment variables for the agent container",
                 "produces": [
@@ -700,13 +605,6 @@ const docTemplate = `{
                 ],
                 "summary": "Get env vars",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -756,13 +654,6 @@ const docTemplate = `{
                 ],
                 "summary": "Replace env vars",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -832,13 +723,6 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
                         "description": "Agent name",
                         "name": "name",
                         "in": "path",
@@ -892,7 +776,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/env/{key}": {
+        "/api/v1/agents/{name}/env/{key}": {
             "delete": {
                 "description": "Removes a single environment variable by name. Triggers pod recreation.",
                 "produces": [
@@ -903,13 +787,6 @@ const docTemplate = `{
                 ],
                 "summary": "Delete env var",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -954,7 +831,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/history": {
+        "/api/v1/agents/{name}/history": {
             "get": {
                 "description": "Returns the full lifecycle event history stored in Agent status",
                 "produces": [
@@ -965,13 +842,6 @@ const docTemplate = `{
                 ],
                 "summary": "Get agent lifecycle history",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -1009,7 +879,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/logs": {
+        "/api/v1/agents/{name}/logs": {
             "get": {
                 "description": "Returns or streams logs from the agent's pod. Use follow=true for live streaming (chunked transfer).",
                 "produces": [
@@ -1020,13 +890,6 @@ const docTemplate = `{
                 ],
                 "summary": "Get pod logs",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -1090,7 +953,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/restart": {
+        "/api/v1/agents/{name}/restart": {
             "post": {
                 "description": "Forces pod recreation by bumping the orchestrator.dev/restart-at annotation",
                 "produces": [
@@ -1101,13 +964,6 @@ const docTemplate = `{
                 ],
                 "summary": "Restart agent",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -1145,7 +1001,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/start": {
+        "/api/v1/agents/{name}/start": {
             "post": {
                 "description": "Resumes a paused agent: sets spec.paused=false and forces pod recreation",
                 "produces": [
@@ -1156,13 +1012,6 @@ const docTemplate = `{
                 ],
                 "summary": "Start agent",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",
@@ -1200,7 +1049,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/namespaces/{namespace}/agents/{name}/stop": {
+        "/api/v1/agents/{name}/stop": {
             "post": {
                 "description": "Pauses the agent: sets spec.paused=true, which causes the controller to delete the Pod and stop reconciling",
                 "produces": [
@@ -1211,13 +1060,6 @@ const docTemplate = `{
                 ],
                 "summary": "Stop agent",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Kubernetes namespace",
-                        "name": "namespace",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Agent name",

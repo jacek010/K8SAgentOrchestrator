@@ -107,7 +107,7 @@ Key Helm values:
 |-------|---------|-------------|
 | `image.repository` | `ghcr.io/jacekmyjkowski/k8s-agent-orchestrator` | Image repo |
 | `image.tag` | chart `appVersion` | Image tag |
-| `watchNamespace` | release namespace | Namespace to watch |
+| `watchNamespace` | release namespace | Namespace to watch **and** default namespace for short REST API URLs (`/api/v1/agents/...`) |
 | `leaderElect` | `false` | Enable leader election |
 | `rbac.create` | `true` | Create Role + RoleBinding |
 | `service.type` | `ClusterIP` | Service type |
@@ -124,6 +124,27 @@ All JSON responses use the envelope format:
 { "status": "ok|created|deleted|error", "data": <payload> }
 ```
 Error responses replace `"data"` with `"message": "<reason>"`.
+
+### Namespace in URLs
+
+Every agent endpoint is available in **two equivalent forms**:
+
+| Form | URL pattern | Namespace used |
+|------|-------------|----------------|
+| **Short** (recommended) | `/api/v1/agents/...` | Default namespace (`default` locally, `.Release.Namespace` via Helm) |
+| **Explicit** | `/api/v1/namespaces/{namespace}/agents/...` | Namespace from the URL |
+
+Both forms accept identical bodies and return identical responses. Use the explicit form only when you need to target a namespace different from the default.
+
+```bash
+# Short form — uses default namespace
+curl http://localhost:8082/api/v1/agents
+
+# Explicit form — targets 'production' namespace
+curl http://localhost:8082/api/v1/namespaces/production/agents
+```
+
+All examples below use the **short form**. Replace `/api/v1/agents` with `/api/v1/namespaces/{namespace}/agents` whenever you need a specific namespace.
 
 ---
 
@@ -146,13 +167,13 @@ curl http://localhost:8082/readyz
 
 ### Agents — CRUD
 
-#### `POST /api/v1/namespaces/:namespace/agents`
+#### `POST /api/v1/agents`
 Create a new Agent (and its Pod).
 
 **Required:** `name`, `image`
 
 ```bash
-curl -X POST http://localhost:8082/api/v1/namespaces/default/agents \
+curl -X POST http://localhost:8082/api/v1/agents \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "my-agent",
@@ -199,36 +220,36 @@ Full body schema:
 
 ---
 
-#### `GET /api/v1/namespaces/:namespace/agents`
-List all Agents in a namespace.
+#### `GET /api/v1/agents`
+List all Agents in the default namespace.
 ```bash
-curl http://localhost:8082/api/v1/namespaces/default/agents
+curl http://localhost:8082/api/v1/agents
 ```
 
 ---
 
-#### `GET /api/v1/namespaces/:namespace/agents/:name`
+#### `GET /api/v1/agents/:name`
 Get a single Agent with its current status (`.status.phase`, `.status.podName`, `.status.conditions`, `.status.history`, `.status.serviceName`).
 ```bash
-curl http://localhost:8082/api/v1/namespaces/default/agents/my-agent
+curl http://localhost:8082/api/v1/agents/my-agent
 ```
 
 ---
 
-#### `PUT /api/v1/namespaces/:namespace/agents/:name`
+#### `PUT /api/v1/agents/:name`
 Update Agent spec. Only non-zero fields in the body are applied. Triggers pod recreation.
 ```bash
-curl -X PUT http://localhost:8082/api/v1/namespaces/default/agents/my-agent \
+curl -X PUT http://localhost:8082/api/v1/agents/my-agent \
   -H 'Content-Type: application/json' \
   -d '{"image": "busybox:1.37"}'
 ```
 
 ---
 
-#### `DELETE /api/v1/namespaces/:namespace/agents/:name`
+#### `DELETE /api/v1/agents/:name`
 Delete the Agent CR (Pod is garbage-collected via finalizer). Also clears the in-memory cache.
 ```bash
-curl -X DELETE http://localhost:8082/api/v1/namespaces/default/agents/my-agent
+curl -X DELETE http://localhost:8082/api/v1/agents/my-agent
 # {"status":"deleted","name":"my-agent"}
 ```
 
@@ -236,28 +257,28 @@ curl -X DELETE http://localhost:8082/api/v1/namespaces/default/agents/my-agent
 
 ### Lifecycle control
 
-#### `POST /api/v1/namespaces/:namespace/agents/:name/restart`
+#### `POST /api/v1/agents/:name/restart`
 Force pod recreation by bumping the `orchestrator.dev/restart-at` annotation.
 ```bash
-curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/restart
+curl -X POST http://localhost:8082/api/v1/agents/my-agent/restart
 # {"status":"ok","data":{"restarted":true}}
 ```
 
 ---
 
-#### `POST /api/v1/namespaces/:namespace/agents/:name/stop`
+#### `POST /api/v1/agents/:name/stop`
 Stop the agent: sets `spec.paused=true`. The controller deletes the Pod and does not recreate it until `/start` is called.
 ```bash
-curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/stop
+curl -X POST http://localhost:8082/api/v1/agents/my-agent/stop
 # {"status":"ok","data":{"stopped":true}}
 ```
 
 ---
 
-#### `POST /api/v1/namespaces/:namespace/agents/:name/start`
+#### `POST /api/v1/agents/:name/start`
 Start (resume) a paused agent. Sets `spec.paused=false` and forces pod recreation.
 ```bash
-curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/start
+curl -X POST http://localhost:8082/api/v1/agents/my-agent/start
 # {"status":"ok","data":{"started":true}}
 ```
 
@@ -276,17 +297,17 @@ Self-healing operates at two levels:
 
 **Lifecycle history survives resurrection.** Before the old CR is garbage-collected, its full `status.history` is captured and embedded as the annotation `orchestrator.dev/pending-history` inside the newly-created CR. The controller drains this annotation on the first reconcile and prepends the accumulated history to any new events, so `kubectl describe` and the `/history` endpoint always show a complete audit trail — even across multiple self-healing cycles.
 
-#### `POST /api/v1/namespaces/:namespace/agents/:name/disable-healing`
+#### `POST /api/v1/agents/:name/disable-healing`
 Disable automatic resurrection for this agent (`spec.selfHealingDisabled=true`). The Agent CR will be permanently deleted when `kubectl delete` is called.
 ```bash
-curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/disable-healing
+curl -X POST http://localhost:8082/api/v1/agents/my-agent/disable-healing
 # {"status":"ok","data":{"selfHealingDisabled":true}}
 ```
 
-#### `POST /api/v1/namespaces/:namespace/agents/:name/enable-healing`
+#### `POST /api/v1/agents/:name/enable-healing`
 Re-enable automatic resurrection (`spec.selfHealingDisabled=false`). This is the default state for all newly created agents.
 ```bash
-curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/enable-healing
+curl -X POST http://localhost:8082/api/v1/agents/my-agent/enable-healing
 # {"status":"ok","data":{"selfHealingDisabled":false}}
 ```
 
@@ -298,39 +319,39 @@ curl -X POST http://localhost:8082/api/v1/namespaces/default/agents/my-agent/ena
 
 All env changes are applied to the Agent spec immediately and trigger a pod recreation.
 
-#### `GET /api/v1/namespaces/:namespace/agents/:name/env`
+#### `GET /api/v1/agents/:name/env`
 Return the current env list.
 ```bash
-curl http://localhost:8082/api/v1/namespaces/default/agents/my-agent/env
+curl http://localhost:8082/api/v1/agents/my-agent/env
 # {"status":"ok","data":[{"name":"LOG_LEVEL","value":"debug"}]}
 ```
 
 ---
 
-#### `PUT /api/v1/namespaces/:namespace/agents/:name/env`
+#### `PUT /api/v1/agents/:name/env`
 **Replace** the entire env list (destructive).
 ```bash
-curl -X PUT http://localhost:8082/api/v1/namespaces/default/agents/my-agent/env \
+curl -X PUT http://localhost:8082/api/v1/agents/my-agent/env \
   -H 'Content-Type: application/json' \
   -d '{"env":[{"name":"LOG_LEVEL","value":"info"},{"name":"PORT","value":"8080"}]}'
 ```
 
 ---
 
-#### `PATCH /api/v1/namespaces/:namespace/agents/:name/env`
+#### `PATCH /api/v1/agents/:name/env`
 **Merge / upsert** individual env vars — existing keys are updated, new keys are appended, unmentioned keys are left intact.
 ```bash
-curl -X PATCH http://localhost:8082/api/v1/namespaces/default/agents/my-agent/env \
+curl -X PATCH http://localhost:8082/api/v1/agents/my-agent/env \
   -H 'Content-Type: application/json' \
   -d '{"env":[{"name":"LOG_LEVEL","value":"warn"},{"name":"NEW_VAR","value":"hello"}]}'
 ```
 
 ---
 
-#### `DELETE /api/v1/namespaces/:namespace/agents/:name/env/:key`
+#### `DELETE /api/v1/agents/:name/env/:key`
 Remove a single env var by name.
 ```bash
-curl -X DELETE http://localhost:8082/api/v1/namespaces/default/agents/my-agent/env/LOG_LEVEL
+curl -X DELETE http://localhost:8082/api/v1/agents/my-agent/env/LOG_LEVEL
 ```
 
 ---
@@ -339,11 +360,11 @@ curl -X DELETE http://localhost:8082/api/v1/namespaces/default/agents/my-agent/e
 
 When an Agent is created with `servicePort > 0`, the controller automatically creates a **ClusterIP Service** named after the agent. The Service selector matches the agent's Pod, enabling stable in-cluster DNS access without knowing the Pod IP.
 
-#### `GET /api/v1/namespaces/:namespace/agents/services`
+#### `GET /api/v1/agents/services`
 Return the ClusterIP DNS URL for every Agent that has a `servicePort` configured.
 
 ```bash
-curl http://localhost:8082/api/v1/namespaces/default/agents/services
+curl http://localhost:8082/api/v1/agents/services
 ```
 ```json
 {
@@ -370,11 +391,11 @@ The Service name is reflected in `status.serviceName` on the Agent CR.
 
 Every significant event (pod creation, spec update, restart, resurrection, env changes…) is appended to `status.history` on the Agent CR. The list is capped at **100 entries** (oldest are evicted first). History survives self-healing resurrections.
 
-#### `GET /api/v1/namespaces/:namespace/agents/:name/history`
+#### `GET /api/v1/agents/:name/history`
 Retrieve the full event history for an agent.
 
 ```bash
-curl http://localhost:8082/api/v1/namespaces/default/agents/my-agent/history
+curl http://localhost:8082/api/v1/agents/my-agent/history
 ```
 ```json
 {
@@ -401,7 +422,7 @@ kubectl describe agent my-agent | grep -A 40 'History:'
 
 ### Logs
 
-#### `GET /api/v1/namespaces/:namespace/agents/:name/logs`
+#### `GET /api/v1/agents/:name/logs`
 
 | Query param | Type | Default | Description |
 |-------------|------|---------|-------------|
@@ -412,13 +433,13 @@ kubectl describe agent my-agent | grep -A 40 'History:'
 
 ```bash
 # Last 200 lines
-curl "http://localhost:8082/api/v1/namespaces/default/agents/my-agent/logs?tailLines=200"
+curl "http://localhost:8082/api/v1/agents/my-agent/logs?tailLines=200"
 
 # Live stream
-curl -N "http://localhost:8082/api/v1/namespaces/default/agents/my-agent/logs?follow=true"
+curl -N "http://localhost:8082/api/v1/agents/my-agent/logs?follow=true"
 
 # Lines from the last 60 seconds
-curl "http://localhost:8082/api/v1/namespaces/default/agents/my-agent/logs?sinceSeconds=60"
+curl "http://localhost:8082/api/v1/agents/my-agent/logs?sinceSeconds=60"
 ```
 
 Response: `text/plain` — raw log lines.
@@ -429,10 +450,10 @@ Response: `text/plain` — raw log lines.
 
 Per-agent, namespaced key-value store with optional TTL. Cache is **in-process only** — it resets when the orchestrator restarts. Useful for temporary state shared between operator logic and external callers.
 
-#### `GET /api/v1/namespaces/:namespace/agents/:name/cache`
+#### `GET /api/v1/agents/:name/cache`
 List all cache entries for the agent.
 ```bash
-curl http://localhost:8082/api/v1/namespaces/default/agents/my-agent/cache
+curl http://localhost:8082/api/v1/agents/my-agent/cache
 ```
 ```json
 {
@@ -446,15 +467,15 @@ curl http://localhost:8082/api/v1/namespaces/default/agents/my-agent/cache
 
 ---
 
-#### `GET /api/v1/namespaces/:namespace/agents/:name/cache/:field`
+#### `GET /api/v1/agents/:name/cache/:field`
 Get a single field. Returns `404` if missing or expired.
 ```bash
-curl http://localhost:8082/api/v1/namespaces/default/agents/my-agent/cache/last-result
+curl http://localhost:8082/api/v1/agents/my-agent/cache/last-result
 ```
 
 ---
 
-#### `PUT /api/v1/namespaces/:namespace/agents/:name/cache/:field`
+#### `PUT /api/v1/agents/:name/cache/:field`
 Set a field with an optional TTL.
 
 | Field | Type | Required | Description |
@@ -464,30 +485,30 @@ Set a field with an optional TTL.
 
 ```bash
 # Permanent
-curl -X PUT http://localhost:8082/api/v1/namespaces/default/agents/my-agent/cache/counter \
+curl -X PUT http://localhost:8082/api/v1/agents/my-agent/cache/counter \
   -H 'Content-Type: application/json' \
   -d '{"value": 42}'
 
 # Expires after 5 minutes
-curl -X PUT http://localhost:8082/api/v1/namespaces/default/agents/my-agent/cache/session-token \
+curl -X PUT http://localhost:8082/api/v1/agents/my-agent/cache/session-token \
   -H 'Content-Type: application/json' \
   -d '{"value": "abc123", "ttl_seconds": 300}'
 ```
 
 ---
 
-#### `DELETE /api/v1/namespaces/:namespace/agents/:name/cache/:field`
+#### `DELETE /api/v1/agents/:name/cache/:field`
 Delete a single field.
 ```bash
-curl -X DELETE http://localhost:8082/api/v1/namespaces/default/agents/my-agent/cache/counter
+curl -X DELETE http://localhost:8082/api/v1/agents/my-agent/cache/counter
 ```
 
 ---
 
-#### `DELETE /api/v1/namespaces/:namespace/agents/:name/cache`
+#### `DELETE /api/v1/agents/:name/cache`
 Clear all cache entries for this agent.
 ```bash
-curl -X DELETE http://localhost:8082/api/v1/namespaces/default/agents/my-agent/cache
+curl -X DELETE http://localhost:8082/api/v1/agents/my-agent/cache
 ```
 
 ---

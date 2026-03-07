@@ -150,13 +150,12 @@ type CreateAgentRequest struct {
 // @Tags         agents
 // @Accept       json
 // @Produce      json
-// @Param        namespace  path      string              true   "Kubernetes namespace"
 // @Param        body       body      CreateAgentRequest  true   "Agent specification"
 // @Success      201        {object}  map[string]interface{}   "created"
 // @Failure      400        {object}  map[string]string        "invalid body"
 // @Failure      409        {object}  map[string]string        "agent already exists"
 // @Failure      500        {object}  map[string]string        "internal error"
-// @Router       /api/v1/namespaces/{namespace}/agents [post]
+// @Router       /api/v1/agents [post]
 func (s *Server) handleCreateAgent(c *gin.Context) {
 	namespace, _ := s.nsName(c)
 
@@ -227,10 +226,9 @@ type AgentServiceInfo struct {
 // @Description  Returns the ClusterIP DNS URL for every Agent that has a ServicePort configured
 // @Tags         agents
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Success      200        {object}  map[string]interface{}  "list of agent service URLs"
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/services [get]
+// @Router       /api/v1/agents/services [get]
 func (s *Server) handleListAgentServices(c *gin.Context) {
 	namespace, _ := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -270,10 +268,9 @@ func (s *Server) handleListAgentServices(c *gin.Context) {
 // @Description  Returns all Agent CRs in the given namespace
 // @Tags         agents
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Success      200        {object}  map[string]interface{}  "list of agents"
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents [get]
+// @Router       /api/v1/agents [get]
 func (s *Server) handleListAgents(c *gin.Context) {
 	namespace, _ := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -292,12 +289,11 @@ func (s *Server) handleListAgents(c *gin.Context) {
 // @Description  Returns a single Agent CR with its current status (phase, podName, conditions)
 // @Tags         agents
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name} [get]
+// @Router       /api/v1/agents/{name} [get]
 func (s *Server) handleGetAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -320,12 +316,11 @@ func (s *Server) handleGetAgent(c *gin.Context) {
 // @Description  Returns the full lifecycle event history stored in Agent status
 // @Tags         agents
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/history [get]
+// @Router       /api/v1/agents/{name}/history [get]
 func (s *Server) handleGetAgentHistory(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -358,14 +353,13 @@ func (s *Server) handleGetAgentHistory(c *gin.Context) {
 // @Tags         agents
 // @Accept       json
 // @Produce      json
-// @Param        namespace  path      string              true  "Kubernetes namespace"
 // @Param        name       path      string              true  "Agent name"
 // @Param        body       body      CreateAgentRequest  true  "Fields to update"
 // @Success      200        {object}  map[string]interface{}
 // @Failure      400        {object}  map[string]string
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name} [put]
+// @Router       /api/v1/agents/{name} [put]
 func (s *Server) handleUpdateAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -435,12 +429,11 @@ func (s *Server) handleUpdateAgent(c *gin.Context) {
 // @Description  Permanently deletes the Agent CR and its Pod. Self-healing is disabled before deletion so the agent is not resurrected. Also clears the in-memory cache.
 // @Tags         agents
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]string  "deleted"
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name} [delete]
+// @Router       /api/v1/agents/{name} [delete]
 func (s *Server) handleDeleteAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -490,12 +483,11 @@ func (s *Server) handleDeleteAgent(c *gin.Context) {
 // @Description  Forces pod recreation by bumping the orchestrator.dev/restart-at annotation
 // @Tags         lifecycle
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}  "restarted: true"
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/restart [post]
+// @Router       /api/v1/agents/{name}/restart [post]
 func (s *Server) handleRestartAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -534,12 +526,11 @@ func (s *Server) handleRestartAgent(c *gin.Context) {
 // @Description  Pauses the agent: sets spec.paused=true, which causes the controller to delete the Pod and stop reconciling
 // @Tags         lifecycle
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}  "stopped: true"
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/stop [post]
+// @Router       /api/v1/agents/{name}/stop [post]
 func (s *Server) handleStopAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -578,12 +569,11 @@ func (s *Server) handleStopAgent(c *gin.Context) {
 // @Description  Resumes a paused agent: sets spec.paused=false and forces pod recreation
 // @Tags         lifecycle
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}  "started: true"
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/start [post]
+// @Router       /api/v1/agents/{name}/start [post]
 func (s *Server) handleStartAgent(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -624,12 +614,11 @@ func (s *Server) handleStartAgent(c *gin.Context) {
 // @Description  Sets spec.selfHealingDisabled=true. The Agent CR will NOT be recreated automatically when deleted externally.
 // @Tags         lifecycle
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}  "selfHealingDisabled: true"
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/disable-healing [post]
+// @Router       /api/v1/agents/{name}/disable-healing [post]
 func (s *Server) handleDisableSelfHealing(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -664,12 +653,11 @@ func (s *Server) handleDisableSelfHealing(c *gin.Context) {
 // @Description  Sets spec.selfHealingDisabled=false. The Agent CR will be automatically recreated when deleted externally (this is the default behaviour).
 // @Tags         lifecycle
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}  "selfHealingDisabled: false"
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/enable-healing [post]
+// @Router       /api/v1/agents/{name}/enable-healing [post]
 func (s *Server) handleEnableSelfHealing(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -706,12 +694,11 @@ func (s *Server) handleEnableSelfHealing(c *gin.Context) {
 // @Description  Returns the current list of environment variables for the agent container
 // @Tags         env
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}  "list of EnvVar"
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/env [get]
+// @Router       /api/v1/agents/{name}/env [get]
 func (s *Server) handleGetEnv(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -740,14 +727,13 @@ type EnvSetRequest struct {
 // @Tags         env
 // @Accept       json
 // @Produce      json
-// @Param        namespace  path      string         true  "Kubernetes namespace"
 // @Param        name       path      string         true  "Agent name"
 // @Param        body       body      EnvSetRequest  true  "New env list"
 // @Success      200        {object}  map[string]interface{}
 // @Failure      400        {object}  map[string]string
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/env [put]
+// @Router       /api/v1/agents/{name}/env [put]
 func (s *Server) handleSetEnv(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -793,14 +779,13 @@ type EnvMergeRequest struct {
 // @Tags         env
 // @Accept       json
 // @Produce      json
-// @Param        namespace  path      string           true  "Kubernetes namespace"
 // @Param        name       path      string           true  "Agent name"
 // @Param        body       body      EnvMergeRequest  true  "Env vars to merge"
 // @Success      200        {object}  map[string]interface{}
 // @Failure      400        {object}  map[string]string
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/env [patch]
+// @Router       /api/v1/agents/{name}/env [patch]
 func (s *Server) handleMergeEnv(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := apiCtx()
@@ -847,13 +832,12 @@ func (s *Server) handleMergeEnv(c *gin.Context) {
 // @Description  Removes a single environment variable by name. Triggers pod recreation.
 // @Tags         env
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Param        key        path      string  true  "Env var name to delete"
 // @Success      200        {object}  map[string]interface{}
 // @Failure      404        {object}  map[string]string
 // @Failure      500        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/env/{key} [delete]
+// @Router       /api/v1/agents/{name}/env/{key} [delete]
 func (s *Server) handleDeleteEnvKey(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	key := c.Param("key")
@@ -916,7 +900,6 @@ func mergeEnvVars(existing, newVars []corev1.EnvVar) []corev1.EnvVar {
 // @Description  Returns or streams logs from the agent's pod. Use follow=true for live streaming (chunked transfer).
 // @Tags         logs
 // @Produce      plain
-// @Param        namespace    path      string  true   "Kubernetes namespace"
 // @Param        name         path      string  true   "Agent name"
 // @Param        tailLines    query     integer false  "Number of lines from the end" default(100)
 // @Param        sinceSeconds query     integer false  "Only lines newer than N seconds"
@@ -925,7 +908,7 @@ func mergeEnvVars(existing, newVars []corev1.EnvVar) []corev1.EnvVar {
 // @Success      200          {string}  string  "log lines"
 // @Failure      404          {object}  map[string]string
 // @Failure      500          {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/logs [get]
+// @Router       /api/v1/agents/{name}/logs [get]
 func (s *Server) handleGetLogs(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -1011,10 +994,9 @@ func (s *Server) handleGetLogs(c *gin.Context) {
 // @Description  Returns all in-memory cache entries for the given agent
 // @Tags         cache
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache [get]
+// @Router       /api/v1/agents/{name}/cache [get]
 func (s *Server) handleListCache(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	entries := s.cache.List(namespace, name)
@@ -1026,12 +1008,11 @@ func (s *Server) handleListCache(c *gin.Context) {
 // @Description  Returns a single cache entry by field name. Returns 404 if missing or expired.
 // @Tags         cache
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Param        field      path      string  true  "Cache field name"
 // @Success      200        {object}  map[string]interface{}
 // @Failure      404        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache/{field} [get]
+// @Router       /api/v1/agents/{name}/cache/{field} [get]
 func (s *Server) handleGetCacheField(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	field := c.Param("field")
@@ -1054,13 +1035,12 @@ type CacheSetRequest struct {
 // @Tags         cache
 // @Accept       json
 // @Produce      json
-// @Param        namespace  path      string          true  "Kubernetes namespace"
 // @Param        name       path      string          true  "Agent name"
 // @Param        field      path      string          true  "Cache field name"
 // @Param        body       body      CacheSetRequest true  "Value and optional TTL"
 // @Success      200        {object}  map[string]interface{}
 // @Failure      400        {object}  map[string]string
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache/{field} [put]
+// @Router       /api/v1/agents/{name}/cache/{field} [put]
 func (s *Server) handleSetCacheField(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	field := c.Param("field")
@@ -1081,11 +1061,10 @@ func (s *Server) handleSetCacheField(c *gin.Context) {
 // @Description  Removes a single field from the per-agent cache
 // @Tags         cache
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Param        field      path      string  true  "Cache field name"
 // @Success      200        {object}  map[string]interface{}  "deleted: true"
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache/{field} [delete]
+// @Router       /api/v1/agents/{name}/cache/{field} [delete]
 func (s *Server) handleDeleteCacheField(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	field := c.Param("field")
@@ -1098,10 +1077,9 @@ func (s *Server) handleDeleteCacheField(c *gin.Context) {
 // @Description  Removes all cache entries for the given agent
 // @Tags         cache
 // @Produce      json
-// @Param        namespace  path      string  true  "Kubernetes namespace"
 // @Param        name       path      string  true  "Agent name"
 // @Success      200        {object}  map[string]interface{}  "cleared: true"
-// @Router       /api/v1/namespaces/{namespace}/agents/{name}/cache [delete]
+// @Router       /api/v1/agents/{name}/cache [delete]
 func (s *Server) handleClearCache(c *gin.Context) {
 	namespace, name := s.nsName(c)
 	s.cache.ClearAgent(namespace, name)

@@ -375,15 +375,9 @@ info:
   title: K8s Agent Orchestrator API
   version: "1.0"
 paths:
-  /api/v1/namespaces/{namespace}/agents:
+  /api/v1/agents:
     get:
       description: Returns all Agent CRs in the given namespace
-      parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       produces:
       - application/json
       responses:
@@ -406,11 +400,6 @@ paths:
       - application/json
       description: Creates a new Agent CR; the controller then creates a Pod for it
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent specification
         in: body
         name: body
@@ -446,17 +435,12 @@ paths:
       summary: Create agent
       tags:
       - agents
-  /api/v1/namespaces/{namespace}/agents/{name}:
+  /api/v1/agents/{name}:
     delete:
       description: Permanently deletes the Agent CR and its Pod. Self-healing is disabled
         before deletion so the agent is not resurrected. Also clears the in-memory
         cache.
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -490,11 +474,6 @@ paths:
       description: Returns a single Agent CR with its current status (phase, podName,
         conditions)
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -529,11 +508,6 @@ paths:
       description: Updates Agent spec fields; only non-zero fields are applied. Triggers
         pod recreation.
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -574,15 +548,10 @@ paths:
       summary: Update agent
       tags:
       - agents
-  /api/v1/namespaces/{namespace}/agents/{name}/cache:
+  /api/v1/agents/{name}/cache:
     delete:
       description: Removes all cache entries for the given agent
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -602,11 +571,6 @@ paths:
     get:
       description: Returns all in-memory cache entries for the given agent
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -623,15 +587,10 @@ paths:
       summary: List cache entries
       tags:
       - cache
-  /api/v1/namespaces/{namespace}/agents/{name}/cache/{field}:
+  /api/v1/agents/{name}/cache/{field}:
     delete:
       description: Removes a single field from the per-agent cache
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -657,11 +616,6 @@ paths:
       description: Returns a single cache entry by field name. Returns 404 if missing
         or expired.
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -695,11 +649,6 @@ paths:
       description: Stores a value in the per-agent cache with an optional TTL. ttl_seconds=0
         means no expiry.
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -733,16 +682,11 @@ paths:
       summary: Set cache field
       tags:
       - cache
-  /api/v1/namespaces/{namespace}/agents/{name}/disable-healing:
+  /api/v1/agents/{name}/disable-healing:
     post:
       description: Sets spec.selfHealingDisabled=true. The Agent CR will NOT be recreated
         automatically when deleted externally.
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -771,16 +715,11 @@ paths:
       summary: Disable self-healing
       tags:
       - lifecycle
-  /api/v1/namespaces/{namespace}/agents/{name}/enable-healing:
+  /api/v1/agents/{name}/enable-healing:
     post:
       description: Sets spec.selfHealingDisabled=false. The Agent CR will be automatically
         recreated when deleted externally (this is the default behaviour).
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -809,16 +748,11 @@ paths:
       summary: Enable self-healing
       tags:
       - lifecycle
-  /api/v1/namespaces/{namespace}/agents/{name}/env:
+  /api/v1/agents/{name}/env:
     get:
       description: Returns the current list of environment variables for the agent
         container
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -853,11 +787,6 @@ paths:
       description: Upserts env vars by name — existing keys are updated, new keys
         are appended, unmentioned keys are left intact. Triggers pod recreation.
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -903,11 +832,6 @@ paths:
       - application/json
       description: Replaces the entire env list (destructive). Triggers pod recreation.
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -948,15 +872,10 @@ paths:
       summary: Replace env vars
       tags:
       - env
-  /api/v1/namespaces/{namespace}/agents/{name}/env/{key}:
+  /api/v1/agents/{name}/env/{key}:
     delete:
       description: Removes a single environment variable by name. Triggers pod recreation.
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -990,15 +909,10 @@ paths:
       summary: Delete env var
       tags:
       - env
-  /api/v1/namespaces/{namespace}/agents/{name}/history:
+  /api/v1/agents/{name}/history:
     get:
       description: Returns the full lifecycle event history stored in Agent status
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -1027,16 +941,11 @@ paths:
       summary: Get agent lifecycle history
       tags:
       - agents
-  /api/v1/namespaces/{namespace}/agents/{name}/logs:
+  /api/v1/agents/{name}/logs:
     get:
       description: Returns or streams logs from the agent's pod. Use follow=true for
         live streaming (chunked transfer).
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -1083,16 +992,11 @@ paths:
       summary: Get pod logs
       tags:
       - logs
-  /api/v1/namespaces/{namespace}/agents/{name}/restart:
+  /api/v1/agents/{name}/restart:
     post:
       description: Forces pod recreation by bumping the orchestrator.dev/restart-at
         annotation
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -1121,16 +1025,11 @@ paths:
       summary: Restart agent
       tags:
       - lifecycle
-  /api/v1/namespaces/{namespace}/agents/{name}/start:
+  /api/v1/agents/{name}/start:
     post:
       description: 'Resumes a paused agent: sets spec.paused=false and forces pod
         recreation'
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -1159,16 +1058,11 @@ paths:
       summary: Start agent
       tags:
       - lifecycle
-  /api/v1/namespaces/{namespace}/agents/{name}/stop:
+  /api/v1/agents/{name}/stop:
     post:
       description: 'Pauses the agent: sets spec.paused=true, which causes the controller
         to delete the Pod and stop reconciling'
       parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       - description: Agent name
         in: path
         name: name
@@ -1197,16 +1091,10 @@ paths:
       summary: Stop agent
       tags:
       - lifecycle
-  /api/v1/namespaces/{namespace}/agents/services:
+  /api/v1/agents/services:
     get:
       description: Returns the ClusterIP DNS URL for every Agent that has a ServicePort
         configured
-      parameters:
-      - description: Kubernetes namespace
-        in: path
-        name: namespace
-        required: true
-        type: string
       produces:
       - application/json
       responses:
