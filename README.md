@@ -7,22 +7,22 @@ A Kubernetes operator written in **Go** that manages **Agent** custom resources 
 ## Architecture
 
 ```
-┌─────────────┐   REST :8082   ┌──────────────────────────┐
+┌─────────────┐   REST :8082   ┌─────────────────────────-─┐
 │   Client    │ ◄────────────► │   REST API (Gin)          │
 │   (A2A/CLI) │                │   internal/rest/          │
-└──────┬──────┘                └────────────┬─────────────┘
+└──────┬──────┘                └────────────┬─────────────-┘
        │  POST /keepalive                   │ controller-runtime client
-       │  (wake + idle reset)  ┌────────────▼─────────────┐
-       └──────────────────────►│   Agent CRD               │
+       │  (wake + idle reset)  ┌────────────▼─────────────--┐
+       └──────────────────────►│   Agent CRD                │
                                │   orchestrator.dev/v1alpha1│
-                               └────────────┬─────────────┘
+                               └────────────┬─────────────--┘
                                             │ reconcile loop
                           ┌─────────────────┴─────────────────┐
                           │                                   │
-               ┌──────────▼──────────┐           ┌───────────▼──────────┐
-               │   Pod  (1 per Agent)│◄──────────►│  ClusterIP Service   │
+               ┌──────────▼──────────┐            ┌───────────▼──────────-┐
+               │   Pod  (1 per Agent)│◄──────────►│  ClusterIP Service    │
                │                     │  direct    │  (optional, per Agent)│
-               └─────────────────────┘  A2A traffic└──────────────────────┘
+               └─────────────────────┘ traffic    └──────────────────────-┘
 
 ┌──────────────────────────────────────────────────────────────┐
 │  Idle Watcher (goroutine)   internal/idle/watcher.go         │
