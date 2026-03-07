@@ -88,6 +88,20 @@ type AgentSpec struct {
 	// By default (false) the orchestrator will recreate the Agent CR automatically.
 	// +optional
 	SelfHealingDisabled bool `json:"selfHealingDisabled,omitempty"`
+
+	// ServicePort, when greater than 0, causes the controller to create a ClusterIP Service
+	// named after the Agent that selects the agent Pod and exposes it on this port.
+	// Set to 0 (or omit) to disable the Service.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	ServicePort int32 `json:"servicePort,omitempty"`
+
+	// ServiceProtocol is the network protocol for the Service port.
+	// Defaults to TCP.
+	// +kubebuilder:validation:Enum=TCP;UDP;SCTP
+	// +optional
+	ServiceProtocol corev1.Protocol `json:"serviceProtocol,omitempty"`
 }
 
 // LifecycleEvent records a single lifecycle operation on this Agent.
@@ -160,6 +174,11 @@ type AgentStatus struct {
 	// RestoredFrom is the original Agent name that was deleted and triggered this resurrection.
 	// +optional
 	RestoredFrom string `json:"restoredFrom,omitempty"`
+
+	// ServiceName is the name of the ClusterIP Service created for this Agent.
+	// Populated only when spec.servicePort > 0.
+	// +optional
+	ServiceName string `json:"serviceName,omitempty"`
 
 	// History contains an ordered list of lifecycle events for this Agent (newest last).
 	// Unlike Kubernetes Events, entries survive resurrections because they are stored in

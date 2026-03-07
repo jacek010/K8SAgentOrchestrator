@@ -85,7 +85,9 @@ func (s *Server) registerRoutes() {
 			{
 				agents.POST("", s.handleCreateAgent)
 				agents.GET("", s.handleListAgents)
+				agents.GET("/services", s.handleListAgentServices)
 				agents.GET("/:name", s.handleGetAgent)
+				agents.GET("/:name/history", s.handleGetAgentHistory)
 				agents.PUT("/:name", s.handleUpdateAgent)
 				agents.DELETE("/:name", s.handleDeleteAgent)
 

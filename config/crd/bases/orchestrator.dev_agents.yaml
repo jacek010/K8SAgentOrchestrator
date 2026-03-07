@@ -356,6 +356,24 @@ spec:
                 description: ServiceAccountName is the name of the ServiceAccount
                   to use to run this agent Pod.
                 type: string
+              servicePort:
+                description: |-
+                  ServicePort, when greater than 0, causes the controller to create a ClusterIP Service
+                  named after the Agent that selects the agent Pod and exposes it on this port.
+                  Set to 0 (or omit) to disable the Service.
+                format: int32
+                maximum: 65535
+                minimum: 1
+                type: integer
+              serviceProtocol:
+                description: |-
+                  ServiceProtocol is the network protocol for the Service port.
+                  Defaults to TCP.
+                enum:
+                - TCP
+                - UDP
+                - SCTP
+                type: string
               volumeMounts:
                 description: VolumeMounts defines additional volume mounts for the
                   agent container.
@@ -2277,6 +2295,11 @@ spec:
               restoredFrom:
                 description: RestoredFrom is the original Agent name that was deleted
                   and triggered this resurrection.
+                type: string
+              serviceName:
+                description: |-
+                  ServiceName is the name of the ClusterIP Service created for this Agent.
+                  Populated only when spec.servicePort > 0.
                 type: string
             type: object
         type: object

@@ -163,8 +163,9 @@ curl -X POST http://localhost:8082/api/v1/namespaces/default/agents \
       "requests": {"cpu": "50m", "memory": "64Mi"},
       "limits":   {"cpu": "200m","memory": "128Mi"}
     },
-    "podLabels": {"team": "platform"}
-  }'
+    "podLabels": {"team": "platform"},
+    "servicePort": 8080
+}'
 ```
 
 Full body schema:

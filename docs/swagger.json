@@ -123,6 +123,45 @@
                 }
             }
         },
+        "/api/v1/namespaces/{namespace}/agents/services": {
+            "get": {
+                "description": "Returns the ClusterIP DNS URL for every Agent that has a ServicePort configured",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "List agent service URLs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "list of agent service URLs",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/namespaces/{namespace}/agents/{name}": {
             "get": {
                 "description": "Returns a single Agent CR with its current status (phase, podName, conditions)",
@@ -912,6 +951,61 @@
                 }
             }
         },
+        "/api/v1/namespaces/{namespace}/agents/{name}/history": {
+            "get": {
+                "description": "Returns the full lifecycle event history stored in Agent status",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Get agent lifecycle history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Kubernetes namespace",
+                        "name": "namespace",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/namespaces/{namespace}/agents/{name}/logs": {
             "get": {
                 "description": "Returns or streams logs from the agent's pod. Use follow=true for live streaming (chunked transfer).",
@@ -1307,6 +1401,14 @@
                     "type": "boolean"
                 },
                 "serviceAccountName": {
+                    "type": "string"
+                },
+                "servicePort": {
+                    "description": "ServicePort, if non-zero, causes the controller to create a ClusterIP Service on that port.",
+                    "type": "integer"
+                },
+                "serviceProtocol": {
+                    "description": "ServiceProtocol is the protocol of the service port (TCP/UDP/SCTP). Default: TCP.",
                     "type": "string"
                 }
             }

@@ -3,6 +3,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,11 +23,15 @@ import (
 )
 
 const (
-	agentFinalizer    = "orchestrator.dev/finalizer"
-	podOwnerLabel     = "orchestrator.dev/agent"
-	podNamespaceLabel = "orchestrator.dev/namespace"
-	managedByLabel    = "app.kubernetes.io/managed-by"
-	managedByValue    = "k8s-agent-orchestrator"
+	agentFinalizer           = "orchestrator.dev/finalizer"
+	podOwnerLabel            = "orchestrator.dev/agent"
+	podNamespaceLabel        = "orchestrator.dev/namespace"
+	managedByLabel           = "app.kubernetes.io/managed-by"
+	managedByValue           = "k8s-agent-orchestrator"
+	// pendingHistoryAnnotation carries the JSON-encoded LifecycleEvent slice that
+	// resurrectAgentAsync embeds in the newly-created CR. appendHistory drains it
+	// on the first reconcile, avoiding the status-patch race condition.
+	pendingHistoryAnnotation = "orchestrator.dev/pending-history"
 )
 
 // AgentReconciler reconciles an Agent object.
@@ -41,6 +47,7 @@ type AgentReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods/log,verbs=get
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is the main reconciliation loop for the Agent resource.
 func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -64,6 +71,11 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if !controllerutil.ContainsFinalizer(agent, agentFinalizer) {
 		controllerutil.AddFinalizer(agent, agentFinalizer)
 		if err := r.Update(ctx, agent); err != nil {
+			if apierrors.IsConflict(err) {
+				// Object was modified concurrently (e.g. status patch from REST layer).
+				// Requeue quietly — this is a transient race, not a real error.
+				return ctrl.Result{Requeue: true}, nil
+			}
 			return ctrl.Result{}, fmt.Errorf("adding finalizer: %w", err)
 		}
 		return ctrl.Result{Requeue: true}, nil
@@ -131,6 +143,12 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	}
 
+	// Reconcile Service (create/update/delete based on spec.servicePort).
+	if err := r.reconcileService(ctx, agent); err != nil {
+		logger.Error(err, "Failed to reconcile Service")
+		// Non-fatal: log and continue so pod lifecycle is not blocked.
+	}
+
 	// Re-check after 30s to handle transient pod failures.
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 }
@@ -177,6 +195,10 @@ func (r *AgentReconciler) handleDeletion(ctx context.Context, agent *orchestrato
 	// 3. Remove finalizer — K8s will GC the old CR after this Update.
 	controllerutil.RemoveFinalizer(agent, agentFinalizer)
 	if err := r.Update(ctx, agent); err != nil {
+		if apierrors.IsNotFound(err) {
+			// Object already gone (duplicate reconcile after first successful removal).
+			return ctrl.Result{}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 	}
 
@@ -207,9 +229,12 @@ func (r *AgentReconciler) resurrectAgentAsync(
 	now := metav1.Now()
 
 	// Build resurrection annotations (preserve user annotations, add meta).
-	resurrectedAnnotations := make(map[string]string, len(annotations)+2)
+	resurrectedAnnotations := make(map[string]string, len(annotations)+3)
 	for k, v := range annotations {
-		resurrectedAnnotations[k] = v
+		// Don't carry over the old pending-history annotation from a previous resurrection.
+		if k != pendingHistoryAnnotation {
+			resurrectedAnnotations[k] = v
+		}
 	}
 	resurrectedAnnotations["orchestrator.dev/resurrected-at"] = now.UTC().Format(time.RFC3339)
 	resurrectedAnnotations["orchestrator.dev/resurrection-uid"] = originalUID
@@ -230,28 +255,37 @@ func (r *AgentReconciler) resurrectAgentAsync(
 		// Back off before each attempt; first attempt has a short delay to let GC run.
 		time.Sleep(time.Duration(attempt) * 300 * time.Millisecond)
 
+		t := time.Now().UTC().Format("2006-01-02T15:04:05")
+		msg := fmt.Sprintf("[%s] Agent self-healed: recreated after external deletion (original UID %s, attempt %d)", t, originalUID, attempt)
+
+		// Build combined history (previousHistory + Resurrected) and embed it as an
+		// annotation so the controller reads it atomically on the first reconcile.
+		// This avoids the race between resurrectAgentAsync and the reconcile loop.
+		combined := make([]orchestratorv1alpha1.LifecycleEvent, 0, len(previousHistory)+1)
+		combined = append(combined, previousHistory...)
+		combined = append(combined, orchestratorv1alpha1.LifecycleEvent{
+			Time:    metav1.Now(),
+			Type:    corev1.EventTypeNormal,
+			Reason:  "Resurrected",
+			Message: msg,
+		})
+		if len(combined) > maxHistoryLen {
+			combined = combined[len(combined)-maxHistoryLen:]
+		}
+
 		newAgent := resurrected.DeepCopy()
+		if histJSON, err := json.Marshal(combined); err == nil {
+			if newAgent.Annotations == nil {
+				newAgent.Annotations = make(map[string]string)
+			}
+			newAgent.Annotations[pendingHistoryAnnotation] = string(histJSON)
+		}
+
 		err := r.Create(bgCtx, newAgent)
 		if err == nil {
 			logger.Info("Resurrected agent successfully", "attempt", attempt)
-			t := time.Now().UTC().Format("2006-01-02T15:04:05")
-			msg := fmt.Sprintf("[%s] Agent self-healed: recreated after external deletion (original UID %s, attempt %d)", t, originalUID, attempt)
 			r.Recorder.Eventf(newAgent, corev1.EventTypeNormal, "Resurrected", msg)
-			// Persist full history (previous entries + Resurrected event) via Status subresource.
-			patch := client.MergeFrom(newAgent.DeepCopy())
-			combined := make([]orchestratorv1alpha1.LifecycleEvent, 0, len(previousHistory)+1)
-			combined = append(combined, previousHistory...)
-			combined = append(combined, orchestratorv1alpha1.LifecycleEvent{
-				Time:    metav1.Now(),
-				Type:    corev1.EventTypeNormal,
-				Reason:  "Resurrected",
-				Message: msg,
-			})
-			if len(combined) > maxHistoryLen {
-				combined = combined[len(combined)-maxHistoryLen:]
-			}
-			newAgent.Status.History = combined
-			_ = r.Status().Patch(bgCtx, newAgent, patch)
+			// History will be written by appendHistory on the next reconcile (via annotation drain).
 			return
 		}
 
@@ -419,21 +453,76 @@ func (r *AgentReconciler) setCondition(agent *orchestratorv1alpha1.Agent, condTy
 const maxHistoryLen = 100
 
 // appendHistory appends a LifecycleEvent to agent.Status.History and persists it
+// appendHistory appends a LifecycleEvent to agent.Status.History and persists it
 // via a Status subresource patch.  The list is capped at maxHistoryLen; oldest
 // entries are evicted first.  Errors are intentionally swallowed — history is
 // best-effort and must never interrupt the reconcile loop.
+//
+// On every call we re-fetch the Agent to get the latest ResourceVersion, avoiding
+// overwriting Status.History patches made concurrently (e.g. by resurrectAgentAsync).
+// If the object carries a pendingHistoryAnnotation, we drain it as the base history
+// and remove the annotation before appending the new event.
+// Conflicts on either patch are retried once with a fresh Get.
 func (r *AgentReconciler) appendHistory(ctx context.Context, agent *orchestratorv1alpha1.Agent, eventType, reason, message string) {
-	patch := client.MergeFrom(agent.DeepCopy())
-	agent.Status.History = append(agent.Status.History, orchestratorv1alpha1.LifecycleEvent{
-		Time:    metav1.Now(),
-		Type:    eventType,
-		Reason:  reason,
-		Message: message,
-	})
-	if len(agent.Status.History) > maxHistoryLen {
-		agent.Status.History = agent.Status.History[len(agent.Status.History)-maxHistoryLen:]
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Always work from the latest copy to avoid ResourceVersion conflicts.
+		fresh := &orchestratorv1alpha1.Agent{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: agent.Namespace, Name: agent.Name}, fresh); err != nil {
+			return
+		}
+
+		// Base history: either drained from the pending-history annotation
+		// (written by resurrectAgentAsync) or the current Status.History.
+		// We store it in a local variable because r.Patch() overwrites fresh with
+		// the server response, which resets fresh.Status.History to the persisted
+		// value (not the in-memory one we just set).
+		baseHistory := fresh.Status.History
+
+		// Drain a pending-history annotation embedded at resurrection time.
+		if ann, ok := fresh.Annotations[pendingHistoryAnnotation]; ok {
+			var pending []orchestratorv1alpha1.LifecycleEvent
+			if jsonErr := json.Unmarshal([]byte(ann), &pending); jsonErr == nil {
+				baseHistory = pending
+			}
+			// Remove the annotation via a metadata-only patch.
+			metaPatch := client.MergeFrom(fresh.DeepCopy())
+			delete(fresh.Annotations, pendingHistoryAnnotation)
+			if err := r.Patch(ctx, fresh, metaPatch); err != nil {
+				if apierrors.IsConflict(err) {
+					continue // retry: re-Get will drain annotation again
+				}
+				return
+			}
+			// IMPORTANT: r.Patch overwrites fresh with the server response, which
+			// resets fresh.Status.History to the persisted (empty) value.
+			// We deliberately do NOT use fresh.Status.History below; baseHistory
+			// already holds the correct pending history we unmarshalled above.
+		}
+
+		// Build the new history slice and persist it via the Status subresource.
+		newHistory := append(baseHistory, orchestratorv1alpha1.LifecycleEvent{
+			Time:    metav1.Now(),
+			Type:    eventType,
+			Reason:  reason,
+			Message: message,
+		})
+		if len(newHistory) > maxHistoryLen {
+			newHistory = newHistory[len(newHistory)-maxHistoryLen:]
+		}
+
+		// statusPatch is based on fresh (which was updated by the metadata Patch
+		// above, giving us the correct ResourceVersion). We set History explicitly
+		// to newHistory so the MergePatch sends the full array replacement.
+		statusPatch := client.MergeFrom(fresh.DeepCopy())
+		fresh.Status.History = newHistory
+		if err := r.Status().Patch(ctx, fresh, statusPatch); err != nil {
+			if apierrors.IsConflict(err) {
+				continue // retry with fresh Get
+			}
+		}
+		return
 	}
-	_ = r.Status().Patch(ctx, agent, patch)
 }
 
 // podPhaseToAgentPhase maps a Kubernetes Pod phase to an AgentPhase.
@@ -457,7 +546,95 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&orchestratorv1alpha1.Agent{}).
 		Owns(&corev1.Pod{}).
+		Owns(&corev1.Service{}).
 		Complete(r)
+}
+
+// reconcileService ensures a ClusterIP Service exists (or is deleted) for the Agent,
+// depending on whether spec.servicePort is set.
+func (r *AgentReconciler) reconcileService(ctx context.Context, agent *orchestratorv1alpha1.Agent) error {
+	svcKey := types.NamespacedName{Namespace: agent.Namespace, Name: agent.Name}
+	existing := &corev1.Service{}
+	getErr := r.Get(ctx, svcKey, existing)
+
+	// No service desired — delete if it exists.
+	if agent.Spec.ServicePort == 0 {
+		if getErr == nil {
+			if err := r.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("deleting agent service: %w", err)
+			}
+			patch := client.MergeFrom(agent.DeepCopy())
+			agent.Status.ServiceName = ""
+			_ = r.Status().Patch(ctx, agent, patch)
+		}
+		return nil
+	}
+
+	protocol := agent.Spec.ServiceProtocol
+	if protocol == "" {
+		protocol = corev1.ProtocolTCP
+	}
+
+	desiredPorts := []corev1.ServicePort{{
+		Name:       "agent",
+		Protocol:   protocol,
+		Port:       agent.Spec.ServicePort,
+		TargetPort: intstr.FromInt32(agent.Spec.ServicePort),
+	}}
+
+	if apierrors.IsNotFound(getErr) {
+		// Create the Service.
+		svc := &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agent.Name,
+				Namespace: agent.Namespace,
+				Labels: map[string]string{
+					managedByLabel: managedByValue,
+					podOwnerLabel:  agent.Name,
+				},
+			},
+			Spec: corev1.ServiceSpec{
+				Type: corev1.ServiceTypeClusterIP,
+				Selector: map[string]string{
+					podOwnerLabel:  agent.Name,
+					managedByLabel: managedByValue,
+				},
+				Ports: desiredPorts,
+			},
+		}
+		if err := controllerutil.SetControllerReference(agent, svc, r.Scheme); err != nil {
+			return fmt.Errorf("setting service owner reference: %w", err)
+		}
+		if err := r.Create(ctx, svc); err != nil {
+			return fmt.Errorf("creating agent service: %w", err)
+		}
+		patch := client.MergeFrom(agent.DeepCopy())
+		agent.Status.ServiceName = agent.Name
+		_ = r.Status().Patch(ctx, agent, patch)
+		return nil
+	}
+	if getErr != nil {
+		return fmt.Errorf("getting agent service: %w", getErr)
+	}
+
+	// Service already exists — patch port if it drifted.
+	if len(existing.Spec.Ports) != 1 ||
+		existing.Spec.Ports[0].Port != agent.Spec.ServicePort ||
+		existing.Spec.Ports[0].Protocol != protocol {
+		patch := client.MergeFrom(existing.DeepCopy())
+		existing.Spec.Ports = desiredPorts
+		if err := r.Patch(ctx, existing, patch); err != nil {
+			return fmt.Errorf("patching agent service port: %w", err)
+		}
+	}
+
+	// Ensure status is in sync.
+	if agent.Status.ServiceName != agent.Name {
+		patch := client.MergeFrom(agent.DeepCopy())
+		agent.Status.ServiceName = agent.Name
+		_ = r.Status().Patch(ctx, agent, patch)
+	}
+	return nil
 }
 
 // GetPodForAgent returns the current Pod name for a given Agent (used by REST API).

@@ -138,6 +138,10 @@ type CreateAgentRequest struct {
 	SelfHealingDisabled bool `json:"selfHealingDisabled,omitempty"`
 	// Paused prevents pod creation when true.
 	Paused bool `json:"paused,omitempty"`
+	// ServicePort, if non-zero, causes the controller to create a ClusterIP Service on that port.
+	ServicePort int32 `json:"servicePort,omitempty"`
+	// ServiceProtocol is the protocol of the service port (TCP/UDP/SCTP). Default: TCP.
+	ServiceProtocol string `json:"serviceProtocol,omitempty"`
 }
 
 // handleCreateAgent godoc
@@ -186,6 +190,8 @@ func (s *Server) handleCreateAgent(c *gin.Context) {
 			PodAnnotations:     req.PodAnnotations,
 			SelfHealingDisabled: req.SelfHealingDisabled,
 			Paused:              req.Paused,
+			ServicePort:         req.ServicePort,
+			ServiceProtocol:     corev1.Protocol(req.ServiceProtocol),
 		},
 	}
 
@@ -205,6 +211,58 @@ func (s *Server) handleCreateAgent(c *gin.Context) {
 	s.appendHistory(ctx, agent.Namespace, agent.Name, corev1.EventTypeNormal, "Created",
 		fmt.Sprintf("[%s] Agent created via REST API (image: %s)", ts(), agent.Spec.Image))
 	respondCreated(c, agent)
+}
+
+// AgentServiceInfo holds the agent name and its ClusterIP service URL.
+type AgentServiceInfo struct {
+	Agent     string `json:"agent"`
+	Namespace string `json:"namespace"`
+	Port      int32  `json:"port"`
+	Protocol  string `json:"protocol"`
+	URL       string `json:"url"`
+}
+
+// handleListAgentServices godoc
+// @Summary      List agent service URLs
+// @Description  Returns the ClusterIP DNS URL for every Agent that has a ServicePort configured
+// @Tags         agents
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Success      200        {object}  map[string]interface{}  "list of agent service URLs"
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/services [get]
+func (s *Server) handleListAgentServices(c *gin.Context) {
+	namespace, _ := s.nsName(c)
+	ctx, cancel := apiCtx()
+	defer cancel()
+
+	agentList := &orchestratorv1alpha1.AgentList{}
+	if err := s.client.List(ctx, agentList, client.InNamespace(namespace)); err != nil {
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var results []AgentServiceInfo
+	for _, a := range agentList.Items {
+		if a.Spec.ServicePort <= 0 {
+			continue
+		}
+		proto := string(a.Spec.ServiceProtocol)
+		if proto == "" {
+			proto = "TCP"
+		}
+		results = append(results, AgentServiceInfo{
+			Agent:     a.Name,
+			Namespace: namespace,
+			Port:      a.Spec.ServicePort,
+			Protocol:  proto,
+			URL:       fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", a.Name, namespace, a.Spec.ServicePort),
+		})
+	}
+	if results == nil {
+		results = []AgentServiceInfo{}
+	}
+	respondOK(c, results)
 }
 
 // handleListAgents godoc
@@ -255,6 +313,43 @@ func (s *Server) handleGetAgent(c *gin.Context) {
 		return
 	}
 	respondOK(c, agent)
+}
+
+// handleGetAgentHistory godoc
+// @Summary      Get agent lifecycle history
+// @Description  Returns the full lifecycle event history stored in Agent status
+// @Tags         agents
+// @Produce      json
+// @Param        namespace  path      string  true  "Kubernetes namespace"
+// @Param        name       path      string  true  "Agent name"
+// @Success      200        {object}  map[string]interface{}
+// @Failure      404        {object}  map[string]string
+// @Failure      500        {object}  map[string]string
+// @Router       /api/v1/namespaces/{namespace}/agents/{name}/history [get]
+func (s *Server) handleGetAgentHistory(c *gin.Context) {
+	namespace, name := s.nsName(c)
+	ctx, cancel := apiCtx()
+	defer cancel()
+
+	agent := &orchestratorv1alpha1.Agent{}
+	if err := s.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, agent); err != nil {
+		if apierrors.IsNotFound(err) {
+			respondError(c, http.StatusNotFound, "agent not found")
+			return
+		}
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	history := agent.Status.History
+	if history == nil {
+		history = []orchestratorv1alpha1.LifecycleEvent{}
+	}
+	respondOK(c, gin.H{
+		"agent":   name,
+		"count":   len(history),
+		"history": history,
+	})
 }
 
 // handleUpdateAgent godoc
