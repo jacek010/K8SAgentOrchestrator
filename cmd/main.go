@@ -99,8 +99,9 @@ func main() {
 
 	// ── Agent Controller ──────────────────────────────────────────────────────
 	agentReconciler := &controller.AgentReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("agent-controller"),
 	}
 	if err = agentReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Agent")

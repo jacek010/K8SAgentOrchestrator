@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -30,7 +31,8 @@ const (
 // AgentReconciler reconciles an Agent object.
 type AgentReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=orchestrator.dev,resources=agents,verbs=get;list;watch;create;update;patch;delete
@@ -38,6 +40,7 @@ type AgentReconciler struct {
 // +kubebuilder:rbac:groups=orchestrator.dev,resources=agents/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods/log,verbs=get
+// +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is the main reconciliation loop for the Agent resource.
 func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -79,6 +82,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, fmt.Errorf("deleting pod for paused agent: %w", err)
 			}
+			r.Recorder.Event(agent, corev1.EventTypeNormal, "Paused", "Agent paused: Pod deleted and reconciliation halted")
 		}
 		_ = r.updateStatus(ctx, agent, orchestratorv1alpha1.AgentPhaseStopped, "", "Agent is paused")
 		return ctrl.Result{}, nil
@@ -88,16 +92,19 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if pod == nil {
 		logger.Info("Creating Pod for Agent")
 		if err := r.createPod(ctx, agent); err != nil {
+			r.Recorder.Eventf(agent, corev1.EventTypeWarning, "PodCreateFailed", "Failed to create Pod: %v", err)
 			r.setCondition(agent, orchestratorv1alpha1.AgentConditionFailed, corev1.ConditionTrue, "PodCreateFailed", err.Error())
 			_ = r.updateStatus(ctx, agent, orchestratorv1alpha1.AgentPhaseFailed, "", err.Error())
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
+		r.Recorder.Eventf(agent, corev1.EventTypeNormal, "PodCreated", "Pod created successfully for Agent %s", agent.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Detect spec drift (env changes → recreate pod).
 	if r.specChanged(agent, pod) {
 		logger.Info("Agent spec changed, recreating Pod")
+		r.Recorder.Eventf(agent, corev1.EventTypeNormal, "PodRecreated", "Spec change detected: deleting Pod %s for recreation", pod.Name)
 		_ = r.updateStatus(ctx, agent, orchestratorv1alpha1.AgentPhaseUpdating, pod.Name, "Applying spec update")
 		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("deleting stale pod: %w", err)
@@ -161,7 +168,7 @@ func (r *AgentReconciler) handleDeletion(ctx context.Context, agent *orchestrato
 		return ctrl.Result{}, fmt.Errorf("removing finalizer: %w", err)
 	}
 
-	// 4. Resurrect AFTER finalizer removal, in a goroutine with a long-lived context
+	// Resurrect AFTER finalizer removal, in a goroutine with a long-lived context
 	//    so it is not cancelled when the reconcile request completes.
 	if shouldResurrect {
 		logger.Info("Self-healing: scheduling resurrection after finalizer removal")
@@ -208,9 +215,12 @@ func (r *AgentReconciler) resurrectAgentAsync(
 		// Back off before each attempt; first attempt has a short delay to let GC run.
 		time.Sleep(time.Duration(attempt) * 300 * time.Millisecond)
 
-		err := r.Create(bgCtx, resurrected.DeepCopy())
+		newAgent := resurrected.DeepCopy()
+		err := r.Create(bgCtx, newAgent)
 		if err == nil {
 			logger.Info("Resurrected agent successfully", "attempt", attempt)
+			r.Recorder.Eventf(newAgent, corev1.EventTypeNormal, "Resurrected",
+				"Agent self-healed: recreated after external deletion (original UID %s, attempt %d)", originalUID, attempt)
 			return
 		}
 
@@ -236,6 +246,12 @@ func (r *AgentReconciler) resurrectAgentAsync(
 		return
 	}
 	logger.Error(fmt.Errorf("gave up after 15 attempts"), "Failed to resurrect agent")
+	// Emit a warning event on a stub object so it surfaces in the namespace event stream.
+	stub := &orchestratorv1alpha1.Agent{}
+	stub.Name = name
+	stub.Namespace = namespace
+	r.Recorder.Eventf(stub, corev1.EventTypeWarning, "ResurrectionFailed",
+		"Self-healing failed: could not recreate Agent %s/%s after 15 attempts (original UID %s)", namespace, name, originalUID)
 }
 
 // findAgentPod returns the Pod owned by this Agent, or nil if not found.
