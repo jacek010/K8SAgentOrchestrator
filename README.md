@@ -29,9 +29,18 @@ A Kubernetes operator written in **Go** that manages **Agent** custom resources 
 │  Polls all Agents every --idle-check-interval seconds.       │
 │  Sets spec.paused=true when inactivity > effectiveTimeout.   │
 └──────────────────────────────────────────────────────────────┘
+
+┌─────────────┐   HTTP :8083   ┌──────────────────────────────┐
+│  Browser    │ ◄────────────► │  Web UI (embedded SPA)       │
+│             │                │  internal/ui/                │
+│             │   REST :8082   └──────────────────────────────┘
+│             │ ◄────────────► REST API (Gin)
+└─────────────┘
+
 Sidecar services:
   :8080  Prometheus metrics
   :8081  Health / readiness probes
+  :8083  Web UI dashboard
 ```
 
 | Component | Description |
@@ -42,6 +51,7 @@ Sidecar services:
 | **Idle Watcher** | Background goroutine: pauses agents that exceeded their idle timeout; activity tracked via cache |
 | **Cache** | Thread-safe, per-agent, TTL key-value store (in-process memory) |
 | **Lifecycle History** | Append-only event log in `status.history`; survives resurrections; capped at 100 entries |
+| **Web UI** | Browser-based dashboard on `:8083` — full CRUD, phase badges, history, keepalive; pure vanilla JS, no build step |
 | **Helm chart** | Deployment, Service, ServiceAccount, namespaced Role/RoleBinding, CRD |
 
 ### Agent lifecycle phases
@@ -94,9 +104,42 @@ Ports after startup:
 
 | Port | Purpose |
 |------|---------|
-| `8082` | REST API |
-| `8080` | Prometheus metrics (`/metrics`) |
+| `8082` | REST API || `8083` | Web UI dashboard || `8080` | Prometheus metrics (`/metrics`) |
 | `8081` | Health probes (`/healthz`, `/readyz`) |
+
+---
+
+## Web UI
+
+Open **http://localhost:8083** in a browser after starting the orchestrator.
+
+The dashboard is a single HTML file embedded in the binary (`internal/ui/static/index.html`) — no Node.js, no CDN, no build step required.
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| **Agents table** | Lists all agents with phase badge, pod name, image, service port, idle timeout and age. Auto-refreshes every 5 s. |
+| **Phase badges** | Color-coded: Running (green), Stopped (gray), Pending (yellow), Failed (red), Updating (blue), Restoring (purple) |
+| **Create agent** | Modal form — name, image, command, args, env vars (`KEY=VALUE` per line), service port, idle timeout, resource requests/limits, self-healing toggle |
+| **Stop / Start / Restart** | Per-row action buttons; contextually enabled based on current phase |
+| **Delete** | Confirmation dialog before deletion |
+| **Detail modal** | Three-tab view: Overview (full spec + actions), History (lifecycle events, newest first), Keepalive (wake agent, reset idle timer, display SVC URL) |
+| **Search** | Client-side filter by name or image |
+| **Stats bar** | Running / Stopped / other counts |
+
+### CLI flag
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--ui-bind-address` | `:8083` | Address the Web UI listens on. Set to empty string to disable. |
+
+```bash
+# Custom port
+go run ./cmd/main.go --ui-bind-address=:9090
+```
+
+> **CORS:** The REST API on `:8082` is configured with `Access-Control-Allow-Origin: *`, so the browser can call it directly from any origin (including `:8083`).
 
 ---
 
@@ -319,6 +362,7 @@ The orchestrator can automatically pause (stop) agents that have been inactive f
 |------|---------|-------------|
 | `--idle-timeout-default` | `0` | Global idle timeout in seconds. `0` = disabled globally (per-agent `spec.idleTimeout` still works). |
 | `--idle-check-interval` | `30` | How often (seconds) the watcher scans all agents. |
+| `--ui-bind-address` | `:8083` | Address the Web UI dashboard listens on. |
 
 #### `POST /api/v1/agents/:name/keepalive`
 Resets the idle timer. If the agent is paused, wakes it and waits up to `?wait` seconds for `Running` phase.
@@ -683,10 +727,14 @@ K8SAgentOrchestrator/
 │   │   └── agent_controller.go  # Reconcile loop
 │   ├── idle/
 │   │   └── watcher.go           # Idle auto-stop goroutine
-│   └── rest/
-│       ├── server.go            # Gin server + route registration
-│       ├── handlers.go          # All HTTP handlers
-│       └── kubeconfig.go        # in-cluster / KUBECONFIG helper
+│   ├── rest/
+│   │   ├── server.go            # Gin server + route registration (CORS middleware)
+│   │   ├── handlers.go          # All HTTP handlers
+│   │   └── kubeconfig.go        # in-cluster / KUBECONFIG helper
+│   └── ui/
+│       ├── server.go            # Embeds static/ via go:embed
+│       └── static/
+│           └── index.html       # Single-page dashboard (vanilla JS + CSS, no build step)
 ├── helm/k8s-agent-orchestrator/
 │   ├── Chart.yaml
 │   ├── values.yaml
