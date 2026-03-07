@@ -120,7 +120,7 @@ func main() {
 
 	// ── REST API Server ───────────────────────────────────────────────────────
 	// Run in a separate goroutine so it doesn't block the controller manager.
-	restServer := rest.NewServer(mgr.GetClient(), cacheManager, agentReconciler, defaultNamespace, debug)
+	restServer := rest.NewServer(mgr.GetClient(), cacheManager, agentReconciler, mgr.GetEventRecorderFor("agent-rest-api"), defaultNamespace, debug)
 	go func() {
 		setupLog.Info("Starting REST API server", "addr", restAddr)
 		if err := restServer.Run(restAddr); err != nil {

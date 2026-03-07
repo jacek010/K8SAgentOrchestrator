@@ -22,6 +22,35 @@ import (
 
 // ─────────────────────────────── helpers ─────────────────────────────────────
 
+// ts returns a compact UTC timestamp used in Event messages to prevent
+// Kubernetes from deduplicating distinct lifecycle events (k8s merges events
+// with identical reason+message into a single entry with an increased count).
+func ts() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05")
+}
+
+// appendHistory fetches the latest Agent object and appends a LifecycleEvent to
+// its Status.History via a Status subresource patch.  It is intentionally
+// best-effort: errors are silently swallowed so that a history failure never
+// surfaces in the REST response.
+func (s *Server) appendHistory(ctx context.Context, namespace, name, eventType, reason, message string) {
+	agent := &orchestratorv1alpha1.Agent{}
+	if err := s.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, agent); err != nil {
+		return
+	}
+	patch := client.MergeFrom(agent.DeepCopy())
+	agent.Status.History = append(agent.Status.History, orchestratorv1alpha1.LifecycleEvent{
+		Time:    metav1.Now(),
+		Type:    eventType,
+		Reason:  reason,
+		Message: message,
+	})
+	const maxHistory = 100
+	if len(agent.Status.History) > maxHistory {
+		agent.Status.History = agent.Status.History[len(agent.Status.History)-maxHistory:]
+	}
+	_ = s.client.Status().Patch(ctx, agent, patch)
+}
 func respondOK(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "data": data})
 }
@@ -171,6 +200,10 @@ func (s *Server) handleCreateAgent(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "Created",
+		"[%s] Agent created via REST API (image: %s)", ts(), agent.Spec.Image)
+	s.appendHistory(ctx, agent.Namespace, agent.Name, corev1.EventTypeNormal, "Created",
+		fmt.Sprintf("[%s] Agent created via REST API (image: %s)", ts(), agent.Spec.Image))
 	respondCreated(c, agent)
 }
 
@@ -295,6 +328,10 @@ func (s *Server) handleUpdateAgent(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "SpecUpdated",
+		"[%s] Agent spec updated via REST API", ts())
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "SpecUpdated",
+		fmt.Sprintf("[%s] Agent spec updated via REST API", ts()))
 	respondOK(c, agent)
 }
 
@@ -334,10 +371,16 @@ func (s *Server) handleDeleteAgent(c *gin.Context) {
 		}
 	}
 
+	// Emit history BEFORE delete while the object still exists for status patch.
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "Deleted",
+		fmt.Sprintf("[%s] Agent permanently deleted via REST API (self-healing was disabled before deletion)", ts()))
+
 	if err := s.client.Delete(ctx, agent); err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "Deleted",
+		"[%s] Agent permanently deleted via REST API (self-healing was disabled before deletion)", ts())
 
 	// Clean up the in-memory cache for this agent.
 	s.cache.ClearAgent(namespace, name)
@@ -384,6 +427,10 @@ func (s *Server) handleRestartAgent(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "Restarted",
+		"[%s] Agent pod recreation triggered via REST API", ts())
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "Restarted",
+		fmt.Sprintf("[%s] Agent pod recreation triggered via REST API", ts()))
 	respondOK(c, gin.H{"restarted": true})
 }
 
@@ -424,6 +471,10 @@ func (s *Server) handleStopAgent(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "Stopped",
+		"[%s] Agent paused via REST API (spec.paused=true, pod will be deleted)", ts())
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "Stopped",
+		fmt.Sprintf("[%s] Agent paused via REST API (spec.paused=true, pod will be deleted)", ts()))
 	respondOK(c, gin.H{"stopped": true})
 }
 
@@ -466,6 +517,10 @@ func (s *Server) handleStartAgent(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "Started",
+		"[%s] Agent resumed via REST API (spec.paused=false, pod recreation triggered)", ts())
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "Started",
+		fmt.Sprintf("[%s] Agent resumed via REST API (spec.paused=false, pod recreation triggered)", ts()))
 	respondOK(c, gin.H{"started": true})
 }
 
@@ -502,6 +557,10 @@ func (s *Server) handleDisableSelfHealing(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "SelfHealingDisabled",
+		"[%s] Self-healing disabled via REST API — agent will NOT be recreated on external deletion", ts())
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "SelfHealingDisabled",
+		fmt.Sprintf("[%s] Self-healing disabled via REST API — agent will NOT be recreated on external deletion", ts()))
 	respondOK(c, gin.H{"selfHealingDisabled": true})
 }
 
@@ -538,6 +597,10 @@ func (s *Server) handleEnableSelfHealing(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "SelfHealingEnabled",
+		"[%s] Self-healing enabled via REST API — agent will be recreated automatically on external deletion", ts())
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "SelfHealingEnabled",
+		fmt.Sprintf("[%s] Self-healing enabled via REST API — agent will be recreated automatically on external deletion", ts()))
 	respondOK(c, gin.H{"selfHealingDisabled": false})
 }
 
@@ -617,6 +680,10 @@ func (s *Server) handleSetEnv(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "EnvReplaced",
+		"[%s] Env vars replaced via REST API (%d vars, pod recreation triggered)", ts(), len(req.Env))
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "EnvReplaced",
+		fmt.Sprintf("[%s] Env vars replaced via REST API (%d vars, pod recreation triggered)", ts(), len(req.Env)))
 	respondOK(c, agent.Spec.Env)
 }
 
@@ -668,6 +735,15 @@ func (s *Server) handleMergeEnv(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Collect names of upserted vars for the event message.
+	upsertedNames := make([]string, 0, len(req.Env))
+	for _, e := range req.Env {
+		upsertedNames = append(upsertedNames, e.Name)
+	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "EnvMerged",
+		"[%s] Env vars merged via REST API (upserted: %v, total: %d, pod recreation triggered)", ts(), upsertedNames, len(merged))
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "EnvMerged",
+		fmt.Sprintf("[%s] Env vars merged via REST API (upserted: %v, total: %d, pod recreation triggered)", ts(), upsertedNames, len(merged)))
 	respondOK(c, agent.Spec.Env)
 }
 
@@ -712,6 +788,10 @@ func (s *Server) handleDeleteEnvKey(c *gin.Context) {
 		respondError(c, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.recorder.Eventf(agent, corev1.EventTypeNormal, "EnvDeleted",
+		"[%s] Env var %q removed via REST API (pod recreation triggered)", ts(), key)
+	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "EnvDeleted",
+		fmt.Sprintf("[%s] Env var %q removed via REST API (pod recreation triggered)", ts(), key))
 	respondOK(c, agent.Spec.Env)
 }
 

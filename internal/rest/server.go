@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/cache"
@@ -18,11 +19,12 @@ import (
 
 // Server wraps the Gin HTTP engine with all orchestrator dependencies.
 type Server struct {
-	engine    *gin.Engine
-	client    client.Client
-	cache     *cache.AgentCacheManager
+	engine     *gin.Engine
+	client     client.Client
+	cache      *cache.AgentCacheManager
 	reconciler *controller.AgentReconciler
-	namespace string // default namespace if not provided in path
+	recorder   record.EventRecorder
+	namespace  string // default namespace if not provided in path
 }
 
 // NewServer creates and configures the REST server.
@@ -30,6 +32,7 @@ func NewServer(
 	k8sClient client.Client,
 	cache *cache.AgentCacheManager,
 	reconciler *controller.AgentReconciler,
+	recorder record.EventRecorder,
 	defaultNamespace string,
 	debug bool,
 ) *Server {
@@ -46,6 +49,7 @@ func NewServer(
 		client:     k8sClient,
 		cache:      cache,
 		reconciler: reconciler,
+		recorder:   recorder,
 		namespace:  defaultNamespace,
 	}
 

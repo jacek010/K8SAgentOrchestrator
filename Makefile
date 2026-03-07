@@ -8,6 +8,9 @@ HELM_NS      ?= orchestrator
 
 GOFLAGS      ?= -v
 
+# controller-gen may be installed in GOPATH/bin which is not always in $PATH.
+CONTROLLER_GEN ?= $(shell which controller-gen 2>/dev/null || echo "$(shell go env GOPATH)/bin/controller-gen")
+
 .PHONY: help
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} \
@@ -93,16 +96,16 @@ uninstall-crd: ## Delete the Agent CRD (destroys all Agent instances!)
 # ── Manifests (generate CRD from kubebuilder markers) ─────────────────────────
 .PHONY: manifests
 manifests: ## Generate CRD manifests from kubebuilder markers (requires controller-gen)
-	controller-gen rbac:roleName=agent-role crd output:crd:artifacts:config=config/crd/bases \
+	$(CONTROLLER_GEN) rbac:roleName=agent-role crd output:crd:artifacts:config=config/crd/bases \
 	  paths="./..."
 
 .PHONY: generate
 generate: ## Generate deepcopy stubs
-	controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
 # ── Dev workflow ──────────────────────────────────────────────────────────────
 .PHONY: dev
-dev: install-crd swag tidy run ## Install CRD, generate swagger docs and run orchestrator locally
+dev: manifests generate install-crd swag tidy run ## Regen CRD+deepcopy, install CRD, generate swagger docs, run locally
 
 .PHONY: all
 all: fmt vet build ## Format, vet, build

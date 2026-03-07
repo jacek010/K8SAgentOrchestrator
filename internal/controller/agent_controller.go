@@ -82,7 +82,10 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
 				return ctrl.Result{}, fmt.Errorf("deleting pod for paused agent: %w", err)
 			}
-			r.Recorder.Event(agent, corev1.EventTypeNormal, "Paused", "Agent paused: Pod deleted and reconciliation halted")
+			r.Recorder.Eventf(agent, corev1.EventTypeNormal, "Paused",
+				"[%s] Agent paused: Pod deleted and reconciliation halted", time.Now().UTC().Format("2006-01-02T15:04:05"))
+			r.appendHistory(ctx, agent, corev1.EventTypeNormal, "Paused",
+				fmt.Sprintf("[%s] Agent paused: Pod deleted and reconciliation halted", time.Now().UTC().Format("2006-01-02T15:04:05")))
 		}
 		_ = r.updateStatus(ctx, agent, orchestratorv1alpha1.AgentPhaseStopped, "", "Agent is paused")
 		return ctrl.Result{}, nil
@@ -92,20 +95,29 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if pod == nil {
 		logger.Info("Creating Pod for Agent")
 		if err := r.createPod(ctx, agent); err != nil {
-			r.Recorder.Eventf(agent, corev1.EventTypeWarning, "PodCreateFailed", "Failed to create Pod: %v", err)
+			r.Recorder.Eventf(agent, corev1.EventTypeWarning, "PodCreateFailed",
+				"[%s] Failed to create Pod: %v", time.Now().UTC().Format("2006-01-02T15:04:05"), err)
 			r.setCondition(agent, orchestratorv1alpha1.AgentConditionFailed, corev1.ConditionTrue, "PodCreateFailed", err.Error())
 			_ = r.updateStatus(ctx, agent, orchestratorv1alpha1.AgentPhaseFailed, "", err.Error())
+			r.appendHistory(ctx, agent, corev1.EventTypeWarning, "PodCreateFailed",
+				fmt.Sprintf("[%s] Failed to create Pod: %v", time.Now().UTC().Format("2006-01-02T15:04:05"), err))
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
-		r.Recorder.Eventf(agent, corev1.EventTypeNormal, "PodCreated", "Pod created successfully for Agent %s", agent.Name)
+		r.Recorder.Eventf(agent, corev1.EventTypeNormal, "PodCreated",
+			"[%s] Pod created successfully for Agent %s", time.Now().UTC().Format("2006-01-02T15:04:05"), agent.Name)
+		r.appendHistory(ctx, agent, corev1.EventTypeNormal, "PodCreated",
+			fmt.Sprintf("[%s] Pod created successfully for Agent %s", time.Now().UTC().Format("2006-01-02T15:04:05"), agent.Name))
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// Detect spec drift (env changes → recreate pod).
 	if r.specChanged(agent, pod) {
 		logger.Info("Agent spec changed, recreating Pod")
-		r.Recorder.Eventf(agent, corev1.EventTypeNormal, "PodRecreated", "Spec change detected: deleting Pod %s for recreation", pod.Name)
+		r.Recorder.Eventf(agent, corev1.EventTypeNormal, "PodRecreated",
+			"[%s] Spec change detected: deleting Pod %s for recreation", time.Now().UTC().Format("2006-01-02T15:04:05"), pod.Name)
 		_ = r.updateStatus(ctx, agent, orchestratorv1alpha1.AgentPhaseUpdating, pod.Name, "Applying spec update")
+		r.appendHistory(ctx, agent, corev1.EventTypeNormal, "PodRecreated",
+			fmt.Sprintf("[%s] Spec change detected: deleting Pod %s for recreation", time.Now().UTC().Format("2006-01-02T15:04:05"), pod.Name))
 		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("deleting stale pod: %w", err)
 		}
@@ -172,7 +184,9 @@ func (r *AgentReconciler) handleDeletion(ctx context.Context, agent *orchestrato
 	//    so it is not cancelled when the reconcile request completes.
 	if shouldResurrect {
 		logger.Info("Self-healing: scheduling resurrection after finalizer removal")
-		go r.resurrectAgentAsync(agentNamespace, agentName, originalUID, resurrectedSpec, agentLabels, agentAnnotations)
+		agentHistory := make([]orchestratorv1alpha1.LifecycleEvent, len(agent.Status.History))
+		copy(agentHistory, agent.Status.History)
+		go r.resurrectAgentAsync(agentNamespace, agentName, originalUID, resurrectedSpec, agentLabels, agentAnnotations, agentHistory)
 	}
 
 	return ctrl.Result{}, nil
@@ -186,6 +200,7 @@ func (r *AgentReconciler) resurrectAgentAsync(
 	namespace, name, originalUID string,
 	spec *orchestratorv1alpha1.AgentSpec,
 	labels, annotations map[string]string,
+	previousHistory []orchestratorv1alpha1.LifecycleEvent,
 ) {
 	bgCtx := context.Background()
 	logger := log.FromContext(bgCtx).WithValues("agent", name, "namespace", namespace)
@@ -219,8 +234,24 @@ func (r *AgentReconciler) resurrectAgentAsync(
 		err := r.Create(bgCtx, newAgent)
 		if err == nil {
 			logger.Info("Resurrected agent successfully", "attempt", attempt)
-			r.Recorder.Eventf(newAgent, corev1.EventTypeNormal, "Resurrected",
-				"Agent self-healed: recreated after external deletion (original UID %s, attempt %d)", originalUID, attempt)
+			t := time.Now().UTC().Format("2006-01-02T15:04:05")
+			msg := fmt.Sprintf("[%s] Agent self-healed: recreated after external deletion (original UID %s, attempt %d)", t, originalUID, attempt)
+			r.Recorder.Eventf(newAgent, corev1.EventTypeNormal, "Resurrected", msg)
+			// Persist full history (previous entries + Resurrected event) via Status subresource.
+			patch := client.MergeFrom(newAgent.DeepCopy())
+			combined := make([]orchestratorv1alpha1.LifecycleEvent, 0, len(previousHistory)+1)
+			combined = append(combined, previousHistory...)
+			combined = append(combined, orchestratorv1alpha1.LifecycleEvent{
+				Time:    metav1.Now(),
+				Type:    corev1.EventTypeNormal,
+				Reason:  "Resurrected",
+				Message: msg,
+			})
+			if len(combined) > maxHistoryLen {
+				combined = combined[len(combined)-maxHistoryLen:]
+			}
+			newAgent.Status.History = combined
+			_ = r.Status().Patch(bgCtx, newAgent, patch)
 			return
 		}
 
@@ -251,7 +282,8 @@ func (r *AgentReconciler) resurrectAgentAsync(
 	stub.Name = name
 	stub.Namespace = namespace
 	r.Recorder.Eventf(stub, corev1.EventTypeWarning, "ResurrectionFailed",
-		"Self-healing failed: could not recreate Agent %s/%s after 15 attempts (original UID %s)", namespace, name, originalUID)
+		"[%s] Self-healing failed: could not recreate Agent %s/%s after 15 attempts (original UID %s)",
+		time.Now().UTC().Format("2006-01-02T15:04:05"), namespace, name, originalUID)
 }
 
 // findAgentPod returns the Pod owned by this Agent, or nil if not found.
@@ -381,6 +413,27 @@ func (r *AgentReconciler) setCondition(agent *orchestratorv1alpha1.Agent, condTy
 		Message:            message,
 		LastTransitionTime: now,
 	})
+}
+
+// maxHistoryLen caps the number of LifecycleEvent entries stored in Status.History.
+const maxHistoryLen = 100
+
+// appendHistory appends a LifecycleEvent to agent.Status.History and persists it
+// via a Status subresource patch.  The list is capped at maxHistoryLen; oldest
+// entries are evicted first.  Errors are intentionally swallowed — history is
+// best-effort and must never interrupt the reconcile loop.
+func (r *AgentReconciler) appendHistory(ctx context.Context, agent *orchestratorv1alpha1.Agent, eventType, reason, message string) {
+	patch := client.MergeFrom(agent.DeepCopy())
+	agent.Status.History = append(agent.Status.History, orchestratorv1alpha1.LifecycleEvent{
+		Time:    metav1.Now(),
+		Type:    eventType,
+		Reason:  reason,
+		Message: message,
+	})
+	if len(agent.Status.History) > maxHistoryLen {
+		agent.Status.History = agent.Status.History[len(agent.Status.History)-maxHistoryLen:]
+	}
+	_ = r.Status().Patch(ctx, agent, patch)
 }
 
 // podPhaseToAgentPhase maps a Kubernetes Pod phase to an AgentPhase.

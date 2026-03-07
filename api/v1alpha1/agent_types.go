@@ -90,6 +90,21 @@ type AgentSpec struct {
 	SelfHealingDisabled bool `json:"selfHealingDisabled,omitempty"`
 }
 
+// LifecycleEvent records a single lifecycle operation on this Agent.
+// Entries are stored in Status.History and intentionally forwarded to each new CR
+// created by the self-healing mechanism, giving kubectl describe a full audit
+// trail that survives entity-UID churn from resurrections.
+type LifecycleEvent struct {
+	// Time when the event occurred.
+	Time metav1.Time `json:"time"`
+	// Reason is a short CamelCase identifier (e.g. Resurrected, Stopped, EnvMerged).
+	Reason string `json:"reason"`
+	// Type is "Normal" or "Warning".
+	Type string `json:"type"`
+	// Message is a human-readable description.
+	Message string `json:"message"`
+}
+
 // AgentConditionType defines the type of condition.
 type AgentConditionType string
 
@@ -145,11 +160,18 @@ type AgentStatus struct {
 	// RestoredFrom is the original Agent name that was deleted and triggered this resurrection.
 	// +optional
 	RestoredFrom string `json:"restoredFrom,omitempty"`
+
+	// History contains an ordered list of lifecycle events for this Agent (newest last).
+	// Unlike Kubernetes Events, entries survive resurrections because they are stored in
+	// the Agent's status subresource and forwarded to each new CR on self-healing.
+	// Capped at 100 entries; oldest are evicted first.
+	// +optional
+	History []LifecycleEvent `json:"history,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:group=orchestrator.dev,scope=Namespaced,shortName=agt,categories=all
+// +kubebuilder:resource:scope=Namespaced,shortName=agt,categories=all
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 // +kubebuilder:printcolumn:name="Pod",type="string",JSONPath=".status.podName"
 // +kubebuilder:printcolumn:name="Image",type="string",JSONPath=".spec.image"
