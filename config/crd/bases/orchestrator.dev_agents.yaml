@@ -234,6 +234,16 @@ spec:
                       x-kubernetes-map-type: atomic
                   type: object
                 type: array
+              idleTimeout:
+                description: |-
+                  IdleTimeout is the number of seconds of inactivity after which the orchestrator
+                  automatically pauses this agent (sets spec.paused=true, which deletes the Pod).
+                  A value of 0 disables idle tracking for this agent.
+                  When > 0: overrides the global --idle-timeout-default flag.
+                  Activity is reset by any REST API call on this agent or by POST /agents/{name}/keepalive.
+                format: int32
+                minimum: 0
+                type: integer
               image:
                 description: Image is the container image to run.
                 type: string

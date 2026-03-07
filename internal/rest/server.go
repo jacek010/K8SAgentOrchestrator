@@ -15,16 +15,18 @@ import (
 
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/cache"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/controller"
+	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/idle"
 )
 
 // Server wraps the Gin HTTP engine with all orchestrator dependencies.
 type Server struct {
-	engine     *gin.Engine
-	client     client.Client
-	cache      *cache.AgentCacheManager
-	reconciler *controller.AgentReconciler
-	recorder   record.EventRecorder
-	namespace  string // default namespace if not provided in path
+	engine      *gin.Engine
+	client      client.Client
+	cache       *cache.AgentCacheManager
+	reconciler  *controller.AgentReconciler
+	recorder    record.EventRecorder
+	namespace   string        // default namespace if not provided in path
+	idleWatcher *idle.Watcher // nil means idle tracking disabled
 }
 
 // NewServer creates and configures the REST server.
@@ -35,6 +37,7 @@ func NewServer(
 	recorder record.EventRecorder,
 	defaultNamespace string,
 	debug bool,
+	idleWatcher *idle.Watcher,
 ) *Server {
 	if !debug {
 		gin.SetMode(gin.ReleaseMode)
@@ -45,12 +48,13 @@ func NewServer(
 	engine.Use(loggerMiddleware())
 
 	s := &Server{
-		engine:     engine,
-		client:     k8sClient,
-		cache:      cache,
-		reconciler: reconciler,
-		recorder:   recorder,
-		namespace:  defaultNamespace,
+		engine:      engine,
+		client:      k8sClient,
+		cache:       cache,
+		reconciler:  reconciler,
+		recorder:    recorder,
+		namespace:   defaultNamespace,
+		idleWatcher: idleWatcher,
 	}
 
 	s.registerRoutes()
@@ -96,33 +100,40 @@ func (s *Server) registerAgentRoutes(agents *gin.RouterGroup) {
 	agents.POST("", s.handleCreateAgent)
 	agents.GET("", s.handleListAgents)
 	agents.GET("/services", s.handleListAgentServices)
-	agents.GET("/:name", s.handleGetAgent)
-	agents.GET("/:name/history", s.handleGetAgentHistory)
-	agents.PUT("/:name", s.handleUpdateAgent)
-	agents.DELETE("/:name", s.handleDeleteAgent)
+
+	// All /:name/* routes share an activity-tracking middleware that resets the
+	// idle timer whenever any named-agent endpoint is called.
+	named := agents.Group("/:name", s.activityMiddleware())
+	named.GET("", s.handleGetAgent)
+	named.GET("/history", s.handleGetAgentHistory)
+	named.PUT("", s.handleUpdateAgent)
+	named.DELETE("", s.handleDeleteAgent)
 
 	// Lifecycle operations
-	agents.POST("/:name/restart", s.handleRestartAgent)
-	agents.POST("/:name/stop", s.handleStopAgent)
-	agents.POST("/:name/start", s.handleStartAgent)
-	agents.POST("/:name/disable-healing", s.handleDisableSelfHealing)
-	agents.POST("/:name/enable-healing", s.handleEnableSelfHealing)
+	named.POST("/restart", s.handleRestartAgent)
+	named.POST("/stop", s.handleStopAgent)
+	named.POST("/start", s.handleStartAgent)
+	named.POST("/disable-healing", s.handleDisableSelfHealing)
+	named.POST("/enable-healing", s.handleEnableSelfHealing)
+
+	// Idle keep-alive: resets idle timer, wakes agent if paused, waits until Running.
+	named.POST("/keepalive", s.handleKeepalive)
 
 	// Environment variable management
-	agents.GET("/:name/env", s.handleGetEnv)
-	agents.PUT("/:name/env", s.handleSetEnv)
-	agents.PATCH("/:name/env", s.handleMergeEnv)
-	agents.DELETE("/:name/env/:key", s.handleDeleteEnvKey)
+	named.GET("/env", s.handleGetEnv)
+	named.PUT("/env", s.handleSetEnv)
+	named.PATCH("/env", s.handleMergeEnv)
+	named.DELETE("/env/:key", s.handleDeleteEnvKey)
 
 	// Log streaming
-	agents.GET("/:name/logs", s.handleGetLogs)
+	named.GET("/logs", s.handleGetLogs)
 
 	// Per-agent in-memory cache
-	agents.GET("/:name/cache", s.handleListCache)
-	agents.GET("/:name/cache/:field", s.handleGetCacheField)
-	agents.PUT("/:name/cache/:field", s.handleSetCacheField)
-	agents.DELETE("/:name/cache/:field", s.handleDeleteCacheField)
-	agents.DELETE("/:name/cache", s.handleClearCache)
+	named.GET("/cache", s.handleListCache)
+	named.GET("/cache/:field", s.handleGetCacheField)
+	named.PUT("/cache/:field", s.handleSetCacheField)
+	named.DELETE("/cache/:field", s.handleDeleteCacheField)
+	named.DELETE("/cache", s.handleClearCache)
 }
 
 // loggerMiddleware is a minimal structured logger.
@@ -136,6 +147,24 @@ func loggerMiddleware() gin.HandlerFunc {
 			p.Path,
 		)
 	})
+}
+
+// activityMiddleware records the current time in the agent cache so the idle
+// watcher knows when this agent was last active. It is a no-op when idleWatcher is nil.
+func (s *Server) activityMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s.idleWatcher != nil {
+			ns := c.Param("namespace")
+			if ns == "" {
+				ns = s.namespace
+			}
+			name := c.Param("name")
+			if name != "" {
+				s.idleWatcher.TouchActivity(ns, name)
+			}
+		}
+		c.Next()
+	}
 }
 
 // apiCtx returns a context with a 30-second API timeout.

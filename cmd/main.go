@@ -23,6 +23,7 @@ package main
 import (
 	"flag"
 	"os"
+	"time"
 
 	// Import all Kubernetes client auth plugins.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -39,6 +40,7 @@ import (
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/cache"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/controller"
 	_ "github.com/jacekmyjkowski/k8s-agent-orchestrator/docs"
+	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/idle"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/rest"
 )
 
@@ -60,6 +62,8 @@ func main() {
 		defaultNamespace     string
 		leaderElect          bool
 		debug                bool
+		idleTimeoutDefault   int
+		idleCheckInterval    int
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Address to bind the metrics endpoint.")
@@ -68,6 +72,8 @@ func main() {
 	flag.StringVar(&defaultNamespace, "default-namespace", "default", "Default namespace for REST API requests that omit the namespace.")
 	flag.BoolVar(&leaderElect, "leader-elect", false, "Enable leader election for the controller manager.")
 	flag.BoolVar(&debug, "debug", false, "Enable debug logging and Gin debug mode.")
+	flag.IntVar(&idleTimeoutDefault, "idle-timeout-default", 0, "Global idle timeout in seconds. 0 disables idle tracking unless overridden per-agent via spec.idleTimeout.")
+	flag.IntVar(&idleCheckInterval, "idle-check-interval", 30, "How often (in seconds) the idle watcher checks all agents.")
 	flag.Parse()
 
 	// Read override from env (useful inside pod via Helm values).
@@ -97,6 +103,14 @@ func main() {
 	// ── In-memory Cache ───────────────────────────────────────────────────────
 	cacheManager := cache.NewAgentCacheManager()
 
+	// ── Idle Watcher ──────────────────────────────────────────────────────────
+	idleWatcher := &idle.Watcher{
+		Client:        mgr.GetClient(),
+		Cache:         cacheManager,
+		GlobalTimeout: time.Duration(idleTimeoutDefault) * time.Second,
+		CheckInterval: time.Duration(idleCheckInterval) * time.Second,
+	}
+
 	// ── Agent Controller ──────────────────────────────────────────────────────
 	agentReconciler := &controller.AgentReconciler{
 		Client:   mgr.GetClient(),
@@ -120,7 +134,7 @@ func main() {
 
 	// ── REST API Server ───────────────────────────────────────────────────────
 	// Run in a separate goroutine so it doesn't block the controller manager.
-	restServer := rest.NewServer(mgr.GetClient(), cacheManager, agentReconciler, mgr.GetEventRecorderFor("agent-rest-api"), defaultNamespace, debug)
+	restServer := rest.NewServer(mgr.GetClient(), cacheManager, agentReconciler, mgr.GetEventRecorderFor("agent-rest-api"), defaultNamespace, debug, idleWatcher)
 	go func() {
 		setupLog.Info("Starting REST API server", "addr", restAddr)
 		if err := restServer.Run(restAddr); err != nil {
@@ -131,7 +145,22 @@ func main() {
 
 	// ── Start Manager (blocking) ──────────────────────────────────────────────
 	setupLog.Info("Starting controller manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	ctx := ctrl.SetupSignalHandler()
+
+	// Start idle watcher only when at least one timeout source is configured.
+	if idleTimeoutDefault > 0 {
+		setupLog.Info("Starting idle watcher",
+			"globalTimeoutSec", idleTimeoutDefault,
+			"checkIntervalSec", idleCheckInterval,
+		)
+		go idleWatcher.Start(ctx)
+	} else {
+		setupLog.Info("Idle watcher disabled (--idle-timeout-default=0); per-agent spec.idleTimeout still active")
+		// Start watcher anyway so per-agent timeouts work; watcher skips agents with effective timeout==0.
+		go idleWatcher.Start(ctx)
+	}
+
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

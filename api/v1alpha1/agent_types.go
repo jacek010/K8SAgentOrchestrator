@@ -102,6 +102,15 @@ type AgentSpec struct {
 	// +kubebuilder:validation:Enum=TCP;UDP;SCTP
 	// +optional
 	ServiceProtocol corev1.Protocol `json:"serviceProtocol,omitempty"`
+
+	// IdleTimeout is the number of seconds of inactivity after which the orchestrator
+	// automatically pauses this agent (sets spec.paused=true, which deletes the Pod).
+	// A value of 0 disables idle tracking for this agent.
+	// When > 0: overrides the global --idle-timeout-default flag.
+	// Activity is reset by any REST API call on this agent or by POST /agents/{name}/keepalive.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	IdleTimeout int32 `json:"idleTimeout,omitempty"`
 }
 
 // LifecycleEvent records a single lifecycle operation on this Agent.

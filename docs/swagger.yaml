@@ -31,6 +31,11 @@ definitions:
         items:
           $ref: '#/definitions/v1.EnvFromSource'
         type: array
+      idleTimeout:
+        description: |-
+          IdleTimeout is the number of seconds of inactivity after which the orchestrator
+          automatically pauses this agent. 0 disables idle tracking (uses global default).
+        type: integer
       image:
         type: string
       imagePullPolicy:
@@ -941,6 +946,46 @@ paths:
       summary: Get agent lifecycle history
       tags:
       - agents
+  /api/v1/agents/{name}/keepalive:
+    post:
+      description: Resets the idle timer for the agent. If the agent is paused (idle-stopped),
+        wakes it and waits up to 30s for it to reach Running phase. Returns current
+        status and the ClusterIP service URL for direct A2A communication. Call this
+        endpoint periodically (e.g. every idleTimeout/2 seconds) during active A2A
+        sessions to prevent auto-stop.
+      parameters:
+      - description: Agent name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Max seconds to wait for Running (default 30, max 120)
+        in: query
+        name: wait
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: status + svcUrl
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Agent keepalive / wake-on-demand
+      tags:
+      - lifecycle
   /api/v1/agents/{name}/logs:
     get:
       description: Returns or streams logs from the agent's pod. Use follow=true for

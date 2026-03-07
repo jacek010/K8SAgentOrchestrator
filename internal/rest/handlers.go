@@ -142,6 +142,9 @@ type CreateAgentRequest struct {
 	ServicePort int32 `json:"servicePort,omitempty"`
 	// ServiceProtocol is the protocol of the service port (TCP/UDP/SCTP). Default: TCP.
 	ServiceProtocol string `json:"serviceProtocol,omitempty"`
+	// IdleTimeout is the number of seconds of inactivity after which the orchestrator
+	// automatically pauses this agent. 0 disables idle tracking (uses global default).
+	IdleTimeout int32 `json:"idleTimeout,omitempty"`
 }
 
 // handleCreateAgent godoc
@@ -191,6 +194,7 @@ func (s *Server) handleCreateAgent(c *gin.Context) {
 			Paused:              req.Paused,
 			ServicePort:         req.ServicePort,
 			ServiceProtocol:     corev1.Protocol(req.ServiceProtocol),
+			IdleTimeout:         req.IdleTimeout,
 		},
 	}
 
@@ -412,6 +416,9 @@ func (s *Server) handleUpdateAgent(c *gin.Context) {
 	if req.PodAnnotations != nil {
 		agent.Spec.PodAnnotations = req.PodAnnotations
 	}
+	if req.IdleTimeout >= 0 && req.IdleTimeout != agent.Spec.IdleTimeout {
+		agent.Spec.IdleTimeout = req.IdleTimeout
+	}
 
 	if err := s.client.Update(ctx, agent); err != nil {
 		respondError(c, http.StatusInternalServerError, err.Error())
@@ -607,6 +614,122 @@ func (s *Server) handleStartAgent(c *gin.Context) {
 	s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "Started",
 		fmt.Sprintf("[%s] Agent resumed via REST API (spec.paused=false, pod recreation triggered)", ts()))
 	respondOK(c, gin.H{"started": true})
+}
+
+// wakeAgent ensures the agent is unpaused and waits up to waitTimeout for it to
+// reach Running phase. If the agent is already running it returns immediately.
+// Returns the current phase and the ClusterIP service URL (empty when servicePort==0).
+func (s *Server) wakeAgent(ctx context.Context, namespace, name string, waitTimeout time.Duration) (phase string, svcURL string, err error) {
+	agent := &orchestratorv1alpha1.Agent{}
+	if err = s.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, agent); err != nil {
+		return
+	}
+
+	// Build svcURL when a ServicePort is configured.
+	if agent.Spec.ServicePort > 0 {
+		svcName := agent.Name
+		if agent.Status.ServiceName != "" {
+			svcName = agent.Status.ServiceName
+		}
+		svcURL = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", svcName, namespace, agent.Spec.ServicePort)
+	}
+
+	// Already running — nothing to do.
+	if !agent.Spec.Paused && agent.Status.Phase == orchestratorv1alpha1.AgentPhaseRunning {
+		return string(agent.Status.Phase), svcURL, nil
+	}
+
+	// Unpause if needed.
+	if agent.Spec.Paused {
+		patch := client.MergeFrom(agent.DeepCopy())
+		agent.Spec.Paused = false
+		if agent.Annotations == nil {
+			agent.Annotations = make(map[string]string)
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		agent.Annotations["orchestrator.dev/started-at"] = now
+		agent.Annotations["orchestrator.dev/restart-at"] = now
+		agent.Annotations["orchestrator.dev/wake-reason"] = "keepalive"
+		if err = s.client.Patch(ctx, agent, patch); err != nil {
+			return
+		}
+		s.appendHistory(ctx, namespace, name, corev1.EventTypeNormal, "WokeUp",
+			fmt.Sprintf("[%s] Agent woken via keepalive (was idle-paused)", ts()))
+	}
+
+	// Poll until Running or timeout.
+	deadline := time.Now().Add(waitTimeout)
+	for time.Now().Before(deadline) {
+		fresh := &orchestratorv1alpha1.Agent{}
+		if gerr := s.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, fresh); gerr == nil {
+			if fresh.Status.Phase == orchestratorv1alpha1.AgentPhaseRunning {
+				return string(fresh.Status.Phase), svcURL, nil
+			}
+			phase = string(fresh.Status.Phase)
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// Timed out — return last known phase (not an error; caller decides).
+	return phase, svcURL, nil
+}
+
+// handleKeepalive godoc
+// @Summary      Agent keepalive / wake-on-demand
+// @Description  Resets the idle timer for the agent. If the agent is paused (idle-stopped), wakes it and waits up to 30s for it to reach Running phase. Returns current status and the ClusterIP service URL for direct A2A communication. Call this endpoint periodically (e.g. every idleTimeout/2 seconds) during active A2A sessions to prevent auto-stop.
+// @Tags         lifecycle
+// @Produce      json
+// @Param        name    path      string  true   "Agent name"
+// @Param        wait    query     integer false  "Max seconds to wait for Running (default 30, max 120)"
+// @Success      200     {object}  map[string]interface{}  "status + svcUrl"
+// @Failure      404     {object}  map[string]string
+// @Failure      500     {object}  map[string]string
+// @Router       /api/v1/agents/{name}/keepalive [post]
+func (s *Server) handleKeepalive(c *gin.Context) {
+	namespace, name := s.nsName(c)
+
+	// Parse optional ?wait= query param (seconds).
+	waitSec := 30
+	if ws := c.Query("wait"); ws != "" {
+		if n, err := strconv.Atoi(ws); err == nil && n >= 0 && n <= 120 {
+			waitSec = n
+		}
+	}
+	waitTimeout := time.Duration(waitSec) * time.Second
+
+	// The activity middleware has already touched the idle timer.
+	// Run wakeAgent with a context that permits the full wait duration.
+	wakeCtx, cancel := context.WithTimeout(context.Background(), waitTimeout+10*time.Second)
+	defer cancel()
+
+	t0 := time.Now()
+	phase, svcURL, err := s.wakeAgent(wakeCtx, namespace, name, waitTimeout)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			respondError(c, http.StatusNotFound, "agent not found")
+			return
+		}
+		respondError(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	status := "running"
+	if phase != string(orchestratorv1alpha1.AgentPhaseRunning) {
+		status = "starting"
+		if waitSec == 0 {
+			status = "accepted"
+		}
+	}
+
+	resp := gin.H{
+		"status":  status,
+		"phase":   phase,
+		"elapsed": time.Since(t0).Round(time.Millisecond).String(),
+	}
+	if svcURL != "" {
+		resp["svcUrl"] = svcURL
+	}
+	respondOK(c, resp)
 }
 
 // handleDisableSelfHealing godoc

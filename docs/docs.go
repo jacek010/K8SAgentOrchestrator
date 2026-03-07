@@ -879,6 +879,60 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/agents/{name}/keepalive": {
+            "post": {
+                "description": "Resets the idle timer for the agent. If the agent is paused (idle-stopped), wakes it and waits up to 30s for it to reach Running phase. Returns current status and the ClusterIP service URL for direct A2A communication. Call this endpoint periodically (e.g. every idleTimeout/2 seconds) during active A2A sessions to prevent auto-stop.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lifecycle"
+                ],
+                "summary": "Agent keepalive / wake-on-demand",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Agent name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Max seconds to wait for Running (default 30, max 120)",
+                        "name": "wait",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "status + svcUrl",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/agents/{name}/logs": {
             "get": {
                 "description": "Returns or streams logs from the agent's pod. Use follow=true for live streaming (chunked transfer).",
@@ -1203,6 +1257,10 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/v1.EnvFromSource"
                     }
+                },
+                "idleTimeout": {
+                    "description": "IdleTimeout is the number of seconds of inactivity after which the orchestrator\nautomatically pauses this agent. 0 disables idle tracking (uses global default).",
+                    "type": "integer"
                 },
                 "image": {
                     "type": "string"
