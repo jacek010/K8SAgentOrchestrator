@@ -17,9 +17,12 @@ A Kubernetes operator written in **Go** that manages **Agent** custom resources 
                                │   orchestrator.dev/v1alpha1│
                                └────────────┬─────────────┘
                                             │ reconcile loop
-                               ┌────────────▼─────────────┐
-                               │   Pod  (1 per Agent)      │
-                               └──────────────────────────┘
+                          ┌─────────────────┴─────────────────┐
+                          │                                   │
+               ┌──────────▼──────────┐           ┌───────────▼──────────┐
+               │   Pod  (1 per Agent)│           │  ClusterIP Service   │
+               │                     │           │  (optional, per Agent)│
+               └─────────────────────┘           └──────────────────────┘
 Sidecar services:
   :8080  Prometheus metrics
   :8081  Health / readiness probes
@@ -27,10 +30,11 @@ Sidecar services:
 
 | Component | Description |
 |-----------|-------------|
-| **Agent CRD** | Declares desired state (image, env, resources, restart policy…) |
-| **Controller** | Reconcile loop: creates/deletes/restarts Pods from CR; handles finalizer |
-| **REST API** | Gin HTTP server on `:8082` — CRUD agents, patch env, stream logs, manage cache |
+| **Agent CRD** | Declares desired state (image, env, resources, restart policy, servicePort…) |
+| **Controller** | Reconcile loop: creates/deletes/restarts Pods and Services from CR; handles finalizer and self-healing |
+| **REST API** | Gin HTTP server on `:8082` — CRUD agents, patch env, stream logs, manage cache, list service URLs, view history |
 | **Cache** | Thread-safe, per-agent, TTL key-value store (in-process memory) |
+| **Lifecycle History** | Append-only event log in `status.history`; survives resurrections; capped at 100 entries |
 | **Helm chart** | Deployment, Service, ServiceAccount, namespaced Role/RoleBinding, CRD |
 
 ### Agent lifecycle phases
@@ -188,6 +192,8 @@ Full body schema:
 | `annotations` | `map[string]string` | | Annotations on the Agent CR |
 | `paused` | bool | | `true` = delete Pod and halt reconciliation (stop the agent) |
 | `selfHealingDisabled` | bool | | `true` = disable automatic resurrection. **Default: false (self-healing ON)** |
+| `servicePort` | int (1-65535) | | When non-zero the controller creates a **ClusterIP Service** on this port. Set to `0` or omit to disable. |
+| `serviceProtocol` | `TCP`\|`UDP`\|`SCTP` | | Protocol for the Service port. Default: `TCP` |
 
 **Response:** `201 Created`
 
@@ -202,7 +208,7 @@ curl http://localhost:8082/api/v1/namespaces/default/agents
 ---
 
 #### `GET /api/v1/namespaces/:namespace/agents/:name`
-Get a single Agent with its current status (`.status.phase`, `.status.podName`, `.status.conditions`).
+Get a single Agent with its current status (`.status.phase`, `.status.podName`, `.status.conditions`, `.status.history`, `.status.serviceName`).
 ```bash
 curl http://localhost:8082/api/v1/namespaces/default/agents/my-agent
 ```
@@ -268,6 +274,8 @@ Self-healing operates at two levels:
 | **Pod** | `Owns(&corev1.Pod{})` — pod deletion triggers immediate reconcile → pod recreated | ✅ |
 | **Agent CR** | Finalizer-based resurrection — CR deleted → goroutine recreates new CR with same spec | ✅ (unless disabled) |
 
+**Lifecycle history survives resurrection.** Before the old CR is garbage-collected, its full `status.history` is captured and embedded as the annotation `orchestrator.dev/pending-history` inside the newly-created CR. The controller drains this annotation on the first reconcile and prepends the accumulated history to any new events, so `kubectl describe` and the `/history` endpoint always show a complete audit trail — even across multiple self-healing cycles.
+
 #### `POST /api/v1/namespaces/:namespace/agents/:name/disable-healing`
 Disable automatic resurrection for this agent (`spec.selfHealingDisabled=true`). The Agent CR will be permanently deleted when `kubectl delete` is called.
 ```bash
@@ -323,6 +331,70 @@ curl -X PATCH http://localhost:8082/api/v1/namespaces/default/agents/my-agent/en
 Remove a single env var by name.
 ```bash
 curl -X DELETE http://localhost:8082/api/v1/namespaces/default/agents/my-agent/env/LOG_LEVEL
+```
+
+---
+
+### Connectivity — Services
+
+When an Agent is created with `servicePort > 0`, the controller automatically creates a **ClusterIP Service** named after the agent. The Service selector matches the agent's Pod, enabling stable in-cluster DNS access without knowing the Pod IP.
+
+#### `GET /api/v1/namespaces/:namespace/agents/services`
+Return the ClusterIP DNS URL for every Agent that has a `servicePort` configured.
+
+```bash
+curl http://localhost:8082/api/v1/namespaces/default/agents/services
+```
+```json
+{
+  "status": "ok",
+  "data": [
+    {
+      "agent":     "my-agent",
+      "namespace": "default",
+      "port":      8080,
+      "protocol":  "TCP",
+      "url":       "http://my-agent.default.svc.cluster.local:8080"
+    }
+  ]
+}
+```
+
+The URL follows standard Kubernetes DNS: `http://{agent-name}.{namespace}.svc.cluster.local:{port}`.
+
+The Service name is reflected in `status.serviceName` on the Agent CR.
+
+---
+
+### Lifecycle History
+
+Every significant event (pod creation, spec update, restart, resurrection, env changes…) is appended to `status.history` on the Agent CR. The list is capped at **100 entries** (oldest are evicted first). History survives self-healing resurrections.
+
+#### `GET /api/v1/namespaces/:namespace/agents/:name/history`
+Retrieve the full event history for an agent.
+
+```bash
+curl http://localhost:8082/api/v1/namespaces/default/agents/my-agent/history
+```
+```json
+{
+  "status": "ok",
+  "data": {
+    "agent": "my-agent",
+    "count": 4,
+    "history": [
+      { "time": "2026-03-07T13:21:40Z", "type": "Normal",  "reason": "Created",      "message": "[2026-03-07T13:21:40] Agent created via REST API (image: busybox:1.36)" },
+      { "time": "2026-03-07T13:21:40Z", "type": "Normal",  "reason": "PodCreated",   "message": "[2026-03-07T13:21:40] Pod created successfully for Agent my-agent" },
+      { "time": "2026-03-07T13:22:10Z", "type": "Normal",  "reason": "Resurrected",  "message": "[2026-03-07T13:22:10] Agent self-healed: recreated after external deletion (original UID abc-123, attempt 1)" },
+      { "time": "2026-03-07T13:22:11Z", "type": "Normal",  "reason": "PodCreated",   "message": "[2026-03-07T13:22:11] Pod created successfully for Agent my-agent" }
+    ]
+  }
+}
+```
+
+History is also visible via:
+```bash
+kubectl describe agent my-agent | grep -A 40 'History:'
 ```
 
 ---
@@ -432,6 +504,7 @@ metadata:
 spec:
   image: python:3.12-slim
   restartPolicy: Always
+  servicePort: 8080          # creates a ClusterIP Service named 'data-processor'
   env:
     - name: QUEUE_URL
       value: "amqp://rabbitmq:5672"
@@ -499,6 +572,7 @@ kubectl delete  -f agent-example.yaml
 K8SAgentOrchestrator/
 ├── api/v1alpha1/
 │   ├── agent_types.go           # CRD Go types
+│   ├── deepcopy_extra.go        # Hand-written DeepCopy (not overwritten by controller-gen)
 │   ├── groupversion_info.go     # Group/Version registration
 │   └── zz_generated.deepcopy.go
 ├── cmd/
