@@ -1,6 +1,6 @@
 # K8s Agent Orchestrator
 
-A Kubernetes operator written in **Go** that manages **Agent** custom resources — each Agent maps 1-to-1 to a Pod. The orchestrator exposes a **REST API** for full agent lifecycle control, env-var hot-patching, log streaming, and a per-agent in-memory key-value cache.
+A Kubernetes operator written in **Go** that manages **Agent** custom resources — each Agent maps 1-to-1 to a Pod. The orchestrator exposes a **REST API** for full agent lifecycle control, env-var hot-patching, log streaming, and a per-agent key-value cache (Redis-backed or in-memory).
 
 ---
 
@@ -25,7 +25,7 @@ A Kubernetes operator written in **Go** that manages **Agent** custom resources 
   - [Connectivity — Services](#connectivity--services)
   - [Lifecycle History](#lifecycle-history)
   - [Logs](#logs)
-  - [In-memory Cache](#in-memory-cache)
+  - [Cache](#cache)
 - [Agent CR — direct kubectl usage](#agent-cr--direct-kubectl-usage)
 - [Makefile targets](#makefile-targets)
 - [Security](#security)
@@ -79,8 +79,9 @@ Sidecar services:
 | **Controller** | Reconcile loop: creates/deletes/restarts Pods and Services from CR; handles finalizer and self-healing |
 | **REST API** | Gin HTTP server on `:8082` — CRUD agents, patch env, stream logs, manage cache, list service URLs, view history, keepalive |
 | **Idle Watcher** | Background goroutine: pauses agents that exceeded their idle timeout; activity tracked via cache |
-| **Cache** | Thread-safe, per-agent, TTL key-value store (in-process memory) |
-| **Lifecycle History** | Append-only event log in `status.history`; survives resurrections; capped at 100 entries |
+| **Cache** | Thread-safe, per-agent, TTL key-value store backed by **Redis** (or in-process memory fallback) |
+| **Lifecycle History** | Append-only event log stored in **Redis** (or in-memory); persists across restarts; cap via `--history-max-entries` |
+| **Redis** | Optional sidecar (`--redis-addr`): shared cache + persistent history; Bitnami subchart bundled in Helm chart |
 | **Web UI** | Browser-based dashboard on `:8083` — full CRUD, phase badges, history, keepalive; pure vanilla JS, no build step |
 | **Helm chart** | Deployment, Service, ServiceAccount, namespaced Role/RoleBinding, CRD |
 
@@ -315,7 +316,7 @@ curl http://localhost:8082/api/v1/agents
 ---
 
 #### `GET /api/v1/agents/:name`
-Get a single Agent with its current status (`.status.phase`, `.status.podName`, `.status.conditions`, `.status.history`, `.status.serviceName`).
+Get a single Agent with its current status (`.status.phase`, `.status.podName`, `.status.conditions`, `.status.serviceName`).
 ```bash
 curl http://localhost:8082/api/v1/agents/my-agent
 ```
@@ -333,7 +334,7 @@ curl -X PUT http://localhost:8082/api/v1/agents/my-agent \
 ---
 
 #### `DELETE /api/v1/agents/:name`
-Delete the Agent CR (Pod is garbage-collected via finalizer). Also clears the in-memory cache.
+Delete the Agent CR (Pod is garbage-collected via finalizer). Also clears the agent's cache entries.
 ```bash
 curl -X DELETE http://localhost:8082/api/v1/agents/my-agent
 # {"status":"deleted","name":"my-agent"}
@@ -375,7 +376,7 @@ curl -X POST http://localhost:8082/api/v1/agents/my-agent/start
 The orchestrator can automatically pause (stop) agents that have been inactive for a configurable period. This is useful with A2A agents that should not consume cluster resources while idle.
 
 **How it works:**
-1. Every REST API call on a named agent (`/:name/*`) resets a per-agent activity timestamp stored in the in-memory cache.
+1. Every REST API call on a named agent (`/:name/*`) resets a per-agent activity timestamp stored in the cache store.
 2. A background **Idle Watcher** goroutine polls all Agents every `--idle-check-interval` seconds.
 3. If `now − lastActivity > effectiveTimeout`, the watcher sets `spec.paused=true` (Pod is deleted).
 4. The **effective timeout** per agent is: `spec.idleTimeout` if `> 0`, otherwise `--idle-timeout-default`; `0` disables idle tracking.
@@ -393,6 +394,10 @@ The orchestrator can automatically pause (stop) agents that have been inactive f
 | `--idle-timeout-default` | `0` | Global idle timeout in seconds. `0` = disabled globally (per-agent `spec.idleTimeout` still works). |
 | `--idle-check-interval` | `30` | How often (seconds) the watcher scans all agents. |
 | `--ui-bind-address` | `:8083` | Address the Web UI dashboard listens on. |
+| `--redis-addr` | `""` | Redis server address (`host:port`). Leave empty to use in-memory fallback for cache and history. |
+| `--redis-password` | `""` | Redis password. Leave empty if auth is disabled. |
+| `--redis-db` | `0` | Redis database number. |
+| `--history-max-entries` | `1000` | Maximum history entries per agent. Oldest are evicted when the cap is reached. |
 
 #### `POST /api/v1/agents/:name/keepalive`
 Resets the idle timer. If the agent is paused, wakes it and waits up to `?wait` seconds for `Running` phase.
@@ -444,7 +449,7 @@ Self-healing operates at two levels:
 | **Pod** | `Owns(&corev1.Pod{})` — pod deletion triggers immediate reconcile → pod recreated | ✅ |
 | **Agent CR** | Finalizer-based resurrection — CR deleted → goroutine recreates new CR with same spec | ✅ (unless disabled) |
 
-**Lifecycle history survives resurrection.** Before the old CR is garbage-collected, its full `status.history` is captured and embedded as the annotation `orchestrator.dev/pending-history` inside the newly-created CR. The controller drains this annotation on the first reconcile and prepends the accumulated history to any new events, so `kubectl describe` and the `/history` endpoint always show a complete audit trail — even across multiple self-healing cycles.
+**Lifecycle history survives resurrection.** Events are written to the history store (Redis or in-memory) under a stable key scoped to `{namespace}/{name}`. When the controller recreates the CR during self-healing, it appends a `Resurrected` event to the same history — the `/history` endpoint always shows a complete audit trail, even across multiple self-healing cycles. With Redis, history also survives orchestrator restarts.
 
 #### `POST /api/v1/agents/:name/disable-healing`
 Disable automatic resurrection for this agent (`spec.selfHealingDisabled=true`). The Agent CR will be permanently deleted when `kubectl delete` is called.
@@ -538,7 +543,7 @@ The Service name is reflected in `status.serviceName` on the Agent CR.
 
 ### Lifecycle History
 
-Every significant event (pod creation, spec update, restart, resurrection, env changes…) is appended to `status.history` on the Agent CR. The list is capped at **100 entries** (oldest are evicted first). History survives self-healing resurrections.
+Every significant event (pod creation, spec update, restart, resurrection, env changes…) is stored in the **history store** (Redis by default; in-memory when `--redis-addr` is not set). The list is capped at `--history-max-entries` entries (default **1000**; oldest are evicted first). History persists across orchestrator restarts when Redis is used.
 
 #### `GET /api/v1/agents/:name/history`
 Retrieve the full event history for an agent.
@@ -562,10 +567,7 @@ curl http://localhost:8082/api/v1/agents/my-agent/history
 }
 ```
 
-History is also visible via:
-```bash
-kubectl describe agent my-agent | grep -A 40 'History:'
-```
+History is also accessible via the Web UI **History** tab in the agent detail modal.
 
 ---
 
@@ -595,9 +597,9 @@ Response: `text/plain` — raw log lines.
 
 ---
 
-### In-memory Cache
+### Cache
 
-Per-agent, namespaced key-value store with optional TTL. Cache is **in-process only** — it resets when the orchestrator restarts. Useful for temporary state shared between operator logic and external callers.
+Per-agent, namespaced key-value store with optional TTL. Cache is backed by **Redis** when `--redis-addr` is set, or **in-process memory** otherwise. Useful for temporary state shared between operator logic and external callers.
 
 #### `GET /api/v1/agents/:name/cache`
 List all cache entries for the agent.
@@ -752,7 +754,10 @@ K8SAgentOrchestrator/
 │   └── orchestrator.dev_agents.yaml
 ├── internal/
 │   ├── cache/
-│   │   └── cache.go             # In-memory TTL cache
+│   │   ├── cache.go             # CacheStore interface + in-memory TTL implementation
+│   │   └── redis_cache.go       # Redis-backed CacheStore implementation
+│   ├── history/
+│   │   └── history.go           # HistoryStore interface + Redis and in-memory implementations
 │   ├── controller/
 │   │   └── agent_controller.go  # Reconcile loop
 │   ├── idle/
@@ -784,14 +789,14 @@ K8SAgentOrchestrator/
 
 ## TODO
 
-- [ ] **Persistent cache** — replace the in-process key-value store with a backend (e.g. Redis or etcd) so cache survives orchestrator restarts
+- [x] **Persistent cache** — replaced the in-process key-value store with Redis (`--redis-addr`); in-memory fallback retained
 - [ ] **Multi-namespace watch** — support watching all namespaces via `--watch-all-namespaces` flag instead of a single namespace
 - [ ] **Leader election** — enable and test HA mode with multiple orchestrator replicas and proper leader election
 - [ ] **Agent scaling** — allow `spec.replicas > 1` so a single Agent CR can back multiple Pods behind the ClusterIP Service
 - [ ] **Webhook validation** — add a validating/mutating webhook to reject invalid Agent specs at creation time
 - [ ] **gRPC / WebSocket logs** — replace chunked HTTP log streaming with a proper WebSocket or gRPC stream endpoint
 - [ ] **Auth on REST API** — add token-based (Bearer) or mTLS authentication to the REST API
-- [ ] **Persistent lifecycle history** — store history in a ConfigMap or external DB so it survives CRD deletion and cluster rebuilds
+- [x] **Persistent lifecycle history** — history stored in Redis (or in-memory) via `HistoryStore`; survives orchestrator restarts and CR resurrections
 - [ ] **Grafana dashboard** — ship a pre-built Grafana dashboard JSON for the Prometheus metrics exposed on `:8080`
 - [ ] **CLI client** — implement a `kubectl`-style CLI (`orchctl`) wrapping the REST API for scripting and CI usage
 - [ ] **E2E test suite** — add end-to-end tests using `envtest` or a real `kind` cluster in CI

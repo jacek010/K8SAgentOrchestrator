@@ -109,3 +109,25 @@ rbac:
   #   - apiGroups: [""]
   #     resources: ["secrets"]
   #     verbs: ["get", "list"]
+
+# -- Bundled Bitnami Redis subchart. Set enabled: false to use an external Redis instance.
+redis:
+  # -- Enable the bundled Redis subchart.
+  enabled: true
+  auth:
+    # -- Enable Redis authentication.
+    enabled: false
+    # -- Redis password. Used when enabled: true.
+    password: ""
+  # -- Redis deployment architecture: standalone or replication.
+  architecture: standalone
+
+# -- Orchestrator-specific runtime settings.
+orchestrator:
+  # -- Address of an external Redis server (host:port).
+  # Ignored when redis.enabled is true (subchart address is used automatically).
+  redisAddr: ""
+  # -- Redis password for an external Redis instance (overrides redis.auth.password).
+  redisPassword: ""
+  # -- Maximum number of history entries kept per Agent in Redis.
+  historyMaxEntries: 1000

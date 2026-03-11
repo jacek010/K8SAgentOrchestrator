@@ -21,6 +21,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"time"
@@ -38,13 +39,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	orchestratorv1alpha1 "github.com/jacekmyjkowski/k8s-agent-orchestrator/api/v1alpha1"
+	orchestratov1alpha1 "github.com/jacekmyjkowski/k8s-agent-orchestrator/api/v1alpha1"
+	_ "github.com/jacekmyjkowski/k8s-agent-orchestrator/docs"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/cache"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/controller"
-	_ "github.com/jacekmyjkowski/k8s-agent-orchestrator/docs"
+	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/history"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/idle"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/rest"
 	uiserver "github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/ui"
+	redis "github.com/redis/go-redis/v9"
 )
 
 var (
@@ -54,20 +57,25 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(orchestratorv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(orchestratov1alpha1.AddToScheme(scheme))
 }
 
 func main() {
 	var (
-		metricsAddr          string
-		probeAddr            string
-		restAddr             string
-		defaultNamespace     string
-		leaderElect          bool
-		debug                bool
-		idleTimeoutDefault   int
-		idleCheckInterval    int
-		uiAddr               string
+		metricsAddr        string
+		probeAddr          string
+		restAddr           string
+		defaultNamespace   string
+		leaderElect        bool
+		debug              bool
+		idleTimeoutDefault int
+		idleCheckInterval  int
+		uiAddr             string
+		// Redis / history flags
+		redisAddr         string
+		redisPassword     string
+		redisDB           int
+		historyMaxEntries int
 	)
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "Address to bind the metrics endpoint.")
@@ -79,6 +87,10 @@ func main() {
 	flag.IntVar(&idleTimeoutDefault, "idle-timeout-default", 0, "Global idle timeout in seconds. 0 disables idle tracking unless overridden per-agent via spec.idleTimeout.")
 	flag.IntVar(&idleCheckInterval, "idle-check-interval", 30, "How often (in seconds) the idle watcher checks all agents.")
 	flag.StringVar(&uiAddr, "ui-bind-address", ":8083", "Address to bind the web UI dashboard.")
+	flag.StringVar(&redisAddr, "redis-addr", "", "Redis address (host:port). Empty = in-memory fallback.")
+	flag.StringVar(&redisPassword, "redis-password", "", "Redis password.")
+	flag.IntVar(&redisDB, "redis-db", 0, "Redis database index.")
+	flag.IntVar(&historyMaxEntries, "history-max-entries", 1000, "Maximum lifecycle events per agent kept in history.")
 	flag.Parse()
 
 	// Read override from env (useful inside pod via Helm values).
@@ -105,13 +117,32 @@ func main() {
 		os.Exit(1)
 	}
 
-	// ── In-memory Cache ───────────────────────────────────────────────────────
-	cacheManager := cache.NewAgentCacheManager()
+	// ── Cache and History Stores ──────────────────────────────────────────────
+	var cacheStore cache.CacheStore
+	var historyStore history.HistoryStore
+	if redisAddr != "" {
+		rdb := redis.NewClient(&redis.Options{
+			Addr:     redisAddr,
+			Password: redisPassword,
+			DB:       redisDB,
+		})
+		if _, err := rdb.Ping(context.Background()).Result(); err != nil {
+			setupLog.Error(err, "unable to connect to Redis", "addr", redisAddr)
+			os.Exit(1)
+		}
+		setupLog.Info("Using Redis-backed cache and history", "addr", redisAddr)
+		cacheStore = cache.NewRedisCache(rdb)
+		historyStore = history.NewRedisHistory(rdb, historyMaxEntries)
+	} else {
+		setupLog.Info("Using in-memory cache and history (no Redis configured)")
+		cacheStore = cache.NewInMemoryCache()
+		historyStore = history.NewInMemoryHistory(historyMaxEntries)
+	}
 
 	// ── Idle Watcher ──────────────────────────────────────────────────────────
 	idleWatcher := &idle.Watcher{
 		Client:        mgr.GetClient(),
-		Cache:         cacheManager,
+		Cache:         cacheStore,
 		GlobalTimeout: time.Duration(idleTimeoutDefault) * time.Second,
 		CheckInterval: time.Duration(idleCheckInterval) * time.Second,
 	}
@@ -121,6 +152,7 @@ func main() {
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("agent-controller"),
+		History:  historyStore,
 	}
 	if err = agentReconciler.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Agent")
@@ -139,7 +171,7 @@ func main() {
 
 	// ── REST API Server ───────────────────────────────────────────────────────
 	// Run in a separate goroutine so it doesn't block the controller manager.
-	restServer := rest.NewServer(mgr.GetClient(), cacheManager, agentReconciler, mgr.GetEventRecorderFor("agent-rest-api"), defaultNamespace, debug, idleWatcher)
+	restServer := rest.NewServer(mgr.GetClient(), cacheStore, agentReconciler, mgr.GetEventRecorderFor("agent-rest-api"), defaultNamespace, debug, idleWatcher, historyStore)
 	go func() {
 		setupLog.Info("Starting REST API server", "addr", restAddr)
 		if err := restServer.Run(restAddr); err != nil {

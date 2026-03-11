@@ -1,11 +1,23 @@
-// Package cache provides a thread-safe, namespaced in-memory cache for agent state.
+// Package cache provides a thread-safe, namespaced cache for agent state.
 // Each agent gets its own isolated key-value namespace.
+// Use NewInMemoryCache for in-process storage or NewRedisCache for Redis-backed storage.
 package cache
 
 import (
 	"sync"
 	"time"
 )
+
+// CacheStore is the interface for the per-agent key-value cache.
+// Implementations must be safe for concurrent use.
+type CacheStore interface {
+	Set(namespace, name, field string, value interface{}, ttl time.Duration)
+	Get(namespace, name, field string) (interface{}, bool)
+	GetEntry(namespace, name, field string) (*Entry, bool)
+	Delete(namespace, name, field string)
+	List(namespace, name string) map[string]*Entry
+	ClearAgent(namespace, name string)
+}
 
 // Entry represents a single cached value with optional TTL.
 type Entry struct {
@@ -28,15 +40,15 @@ type agentCache struct {
 	entries map[string]*Entry
 }
 
-// AgentCacheManager manages isolated cache namespaces per agent.
-type AgentCacheManager struct {
+// InMemoryCache manages isolated cache namespaces per agent (in-process, volatile).
+type InMemoryCache struct {
 	mu     sync.RWMutex
 	agents map[string]*agentCache // key: "<namespace>/<name>"
 }
 
-// NewAgentCacheManager creates a new cache manager.
-func NewAgentCacheManager() *AgentCacheManager {
-	m := &AgentCacheManager{
+// NewInMemoryCache creates a new in-memory cache manager with a background GC loop.
+func NewInMemoryCache() *InMemoryCache {
+	m := &InMemoryCache{
 		agents: make(map[string]*agentCache),
 	}
 	go m.gcLoop()
@@ -47,7 +59,7 @@ func agentKey(namespace, name string) string {
 	return namespace + "/" + name
 }
 
-func (m *AgentCacheManager) getOrCreate(namespace, name string) *agentCache {
+func (m *InMemoryCache) getOrCreate(namespace, name string) *agentCache {
 	key := agentKey(namespace, name)
 	m.mu.RLock()
 	ac, ok := m.agents[key]
@@ -68,7 +80,7 @@ func (m *AgentCacheManager) getOrCreate(namespace, name string) *agentCache {
 
 // Set stores a value under the given field key for an agent.
 // ttl = 0 means no expiration.
-func (m *AgentCacheManager) Set(namespace, name, field string, value interface{}, ttl time.Duration) {
+func (m *InMemoryCache) Set(namespace, name, field string, value interface{}, ttl time.Duration) {
 	ac := m.getOrCreate(namespace, name)
 	entry := &Entry{
 		Value:     value,
@@ -84,7 +96,7 @@ func (m *AgentCacheManager) Set(namespace, name, field string, value interface{}
 }
 
 // Get retrieves a value from the agent's cache. Returns (value, found).
-func (m *AgentCacheManager) Get(namespace, name, field string) (interface{}, bool) {
+func (m *InMemoryCache) Get(namespace, name, field string) (interface{}, bool) {
 	key := agentKey(namespace, name)
 	m.mu.RLock()
 	ac, ok := m.agents[key]
@@ -102,7 +114,7 @@ func (m *AgentCacheManager) Get(namespace, name, field string) (interface{}, boo
 }
 
 // GetEntry retrieves the full entry metadata.
-func (m *AgentCacheManager) GetEntry(namespace, name, field string) (*Entry, bool) {
+func (m *InMemoryCache) GetEntry(namespace, name, field string) (*Entry, bool) {
 	key := agentKey(namespace, name)
 	m.mu.RLock()
 	ac, ok := m.agents[key]
@@ -120,7 +132,7 @@ func (m *AgentCacheManager) GetEntry(namespace, name, field string) (*Entry, boo
 }
 
 // Delete removes a specific field from an agent's cache.
-func (m *AgentCacheManager) Delete(namespace, name, field string) {
+func (m *InMemoryCache) Delete(namespace, name, field string) {
 	key := agentKey(namespace, name)
 	m.mu.RLock()
 	ac, ok := m.agents[key]
@@ -134,7 +146,7 @@ func (m *AgentCacheManager) Delete(namespace, name, field string) {
 }
 
 // List returns all non-expired key-entry pairs for an agent.
-func (m *AgentCacheManager) List(namespace, name string) map[string]*Entry {
+func (m *InMemoryCache) List(namespace, name string) map[string]*Entry {
 	key := agentKey(namespace, name)
 	m.mu.RLock()
 	ac, ok := m.agents[key]
@@ -154,7 +166,7 @@ func (m *AgentCacheManager) List(namespace, name string) map[string]*Entry {
 }
 
 // ClearAgent removes the entire cache namespace for an agent.
-func (m *AgentCacheManager) ClearAgent(namespace, name string) {
+func (m *InMemoryCache) ClearAgent(namespace, name string) {
 	key := agentKey(namespace, name)
 	m.mu.Lock()
 	delete(m.agents, key)
@@ -162,7 +174,7 @@ func (m *AgentCacheManager) ClearAgent(namespace, name string) {
 }
 
 // gcLoop periodically removes expired entries from all caches.
-func (m *AgentCacheManager) gcLoop() {
+func (m *InMemoryCache) gcLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {

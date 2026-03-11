@@ -15,6 +15,7 @@ import (
 
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/cache"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/controller"
+	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/history"
 	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/idle"
 )
 
@@ -22,7 +23,8 @@ import (
 type Server struct {
 	engine      *gin.Engine
 	client      client.Client
-	cache       *cache.AgentCacheManager
+	cache       cache.CacheStore
+	history     history.HistoryStore
 	reconciler  *controller.AgentReconciler
 	recorder    record.EventRecorder
 	namespace   string        // default namespace if not provided in path
@@ -32,12 +34,13 @@ type Server struct {
 // NewServer creates and configures the REST server.
 func NewServer(
 	k8sClient client.Client,
-	cache *cache.AgentCacheManager,
+	cache cache.CacheStore,
 	reconciler *controller.AgentReconciler,
 	recorder record.EventRecorder,
 	defaultNamespace string,
 	debug bool,
 	idleWatcher *idle.Watcher,
+	historyStore history.HistoryStore,
 ) *Server {
 	if !debug {
 		gin.SetMode(gin.ReleaseMode)
@@ -52,6 +55,7 @@ func NewServer(
 		engine:      engine,
 		client:      k8sClient,
 		cache:       cache,
+		history:     historyStore,
 		reconciler:  reconciler,
 		recorder:    recorder,
 		namespace:   defaultNamespace,

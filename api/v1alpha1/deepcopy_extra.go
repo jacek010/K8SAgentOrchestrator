@@ -131,13 +131,6 @@ func (in *AgentStatus) DeepCopyInto(out *AgentStatus) {
 		in, out := &in.RestoredAt, &out.RestoredAt
 		*out = (*in).DeepCopy()
 	}
-	if in.History != nil {
-		in, out := &in.History, &out.History
-		*out = make([]LifecycleEvent, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
-		}
-	}
 }
 
 // DeepCopy returns a deep copy of AgentStatus.

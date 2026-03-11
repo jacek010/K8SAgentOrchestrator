@@ -3,7 +3,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -20,18 +19,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	orchestratorv1alpha1 "github.com/jacekmyjkowski/k8s-agent-orchestrator/api/v1alpha1"
+	"github.com/jacekmyjkowski/k8s-agent-orchestrator/internal/history"
 )
 
 const (
-	agentFinalizer           = "orchestrator.dev/finalizer"
-	podOwnerLabel            = "orchestrator.dev/agent"
-	podNamespaceLabel        = "orchestrator.dev/namespace"
-	managedByLabel           = "app.kubernetes.io/managed-by"
-	managedByValue           = "k8s-agent-orchestrator"
-	// pendingHistoryAnnotation carries the JSON-encoded LifecycleEvent slice that
-	// resurrectAgentAsync embeds in the newly-created CR. appendHistory drains it
-	// on the first reconcile, avoiding the status-patch race condition.
-	pendingHistoryAnnotation = "orchestrator.dev/pending-history"
+	agentFinalizer    = "orchestrator.dev/finalizer"
+	podOwnerLabel     = "orchestrator.dev/agent"
+	podNamespaceLabel = "orchestrator.dev/namespace"
+	managedByLabel    = "app.kubernetes.io/managed-by"
+	managedByValue    = "k8s-agent-orchestrator"
 )
 
 // AgentReconciler reconciles an Agent object.
@@ -39,6 +35,7 @@ type AgentReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
+	History  history.HistoryStore
 }
 
 // +kubebuilder:rbac:groups=orchestrator.dev,resources=agents,verbs=get;list;watch;create;update;patch;delete
@@ -206,9 +203,7 @@ func (r *AgentReconciler) handleDeletion(ctx context.Context, agent *orchestrato
 	//    so it is not cancelled when the reconcile request completes.
 	if shouldResurrect {
 		logger.Info("Self-healing: scheduling resurrection after finalizer removal")
-		agentHistory := make([]orchestratorv1alpha1.LifecycleEvent, len(agent.Status.History))
-		copy(agentHistory, agent.Status.History)
-		go r.resurrectAgentAsync(agentNamespace, agentName, originalUID, resurrectedSpec, agentLabels, agentAnnotations, agentHistory)
+		go r.resurrectAgentAsync(agentNamespace, agentName, originalUID, resurrectedSpec, agentLabels, agentAnnotations)
 	}
 
 	return ctrl.Result{}, nil
@@ -222,19 +217,15 @@ func (r *AgentReconciler) resurrectAgentAsync(
 	namespace, name, originalUID string,
 	spec *orchestratorv1alpha1.AgentSpec,
 	labels, annotations map[string]string,
-	previousHistory []orchestratorv1alpha1.LifecycleEvent,
 ) {
 	bgCtx := context.Background()
 	logger := log.FromContext(bgCtx).WithValues("agent", name, "namespace", namespace)
 	now := metav1.Now()
 
 	// Build resurrection annotations (preserve user annotations, add meta).
-	resurrectedAnnotations := make(map[string]string, len(annotations)+3)
+	resurrectedAnnotations := make(map[string]string, len(annotations)+2)
 	for k, v := range annotations {
-		// Don't carry over the old pending-history annotation from a previous resurrection.
-		if k != pendingHistoryAnnotation {
-			resurrectedAnnotations[k] = v
-		}
+		resurrectedAnnotations[k] = v
 	}
 	resurrectedAnnotations["orchestrator.dev/resurrected-at"] = now.UTC().Format(time.RFC3339)
 	resurrectedAnnotations["orchestrator.dev/resurrection-uid"] = originalUID
@@ -258,34 +249,12 @@ func (r *AgentReconciler) resurrectAgentAsync(
 		t := time.Now().UTC().Format("2006-01-02T15:04:05")
 		msg := fmt.Sprintf("[%s] Agent self-healed: recreated after external deletion (original UID %s, attempt %d)", t, originalUID, attempt)
 
-		// Build combined history (previousHistory + Resurrected) and embed it as an
-		// annotation so the controller reads it atomically on the first reconcile.
-		// This avoids the race between resurrectAgentAsync and the reconcile loop.
-		combined := make([]orchestratorv1alpha1.LifecycleEvent, 0, len(previousHistory)+1)
-		combined = append(combined, previousHistory...)
-		combined = append(combined, orchestratorv1alpha1.LifecycleEvent{
-			Time:    metav1.Now(),
-			Type:    corev1.EventTypeNormal,
-			Reason:  "Resurrected",
-			Message: msg,
-		})
-		if len(combined) > maxHistoryLen {
-			combined = combined[len(combined)-maxHistoryLen:]
-		}
-
 		newAgent := resurrected.DeepCopy()
-		if histJSON, err := json.Marshal(combined); err == nil {
-			if newAgent.Annotations == nil {
-				newAgent.Annotations = make(map[string]string)
-			}
-			newAgent.Annotations[pendingHistoryAnnotation] = string(histJSON)
-		}
-
 		err := r.Create(bgCtx, newAgent)
 		if err == nil {
 			logger.Info("Resurrected agent successfully", "attempt", attempt)
 			r.Recorder.Eventf(newAgent, corev1.EventTypeNormal, "Resurrected", msg)
-			// History will be written by appendHistory on the next reconcile (via annotation drain).
+			r.appendHistory(bgCtx, newAgent, corev1.EventTypeNormal, "Resurrected", msg)
 			return
 		}
 
@@ -449,79 +418,12 @@ func (r *AgentReconciler) setCondition(agent *orchestratorv1alpha1.Agent, condTy
 	})
 }
 
-// maxHistoryLen caps the number of LifecycleEvent entries stored in Status.History.
-const maxHistoryLen = 100
-
-// appendHistory appends a LifecycleEvent to agent.Status.History and persists it
-// appendHistory appends a LifecycleEvent to agent.Status.History and persists it
-// via a Status subresource patch.  The list is capped at maxHistoryLen; oldest
-// entries are evicted first.  Errors are intentionally swallowed — history is
-// best-effort and must never interrupt the reconcile loop.
-//
-// On every call we re-fetch the Agent to get the latest ResourceVersion, avoiding
-// overwriting Status.History patches made concurrently (e.g. by resurrectAgentAsync).
-// If the object carries a pendingHistoryAnnotation, we drain it as the base history
-// and remove the annotation before appending the new event.
-// Conflicts on either patch are retried once with a fresh Get.
+// appendHistory records a lifecycle event via the history store.
+// It is best-effort: errors are silently swallowed so history failures never
+// interrupt the reconcile loop.
 func (r *AgentReconciler) appendHistory(ctx context.Context, agent *orchestratorv1alpha1.Agent, eventType, reason, message string) {
-	const maxRetries = 3
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Always work from the latest copy to avoid ResourceVersion conflicts.
-		fresh := &orchestratorv1alpha1.Agent{}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: agent.Namespace, Name: agent.Name}, fresh); err != nil {
-			return
-		}
-
-		// Base history: either drained from the pending-history annotation
-		// (written by resurrectAgentAsync) or the current Status.History.
-		// We store it in a local variable because r.Patch() overwrites fresh with
-		// the server response, which resets fresh.Status.History to the persisted
-		// value (not the in-memory one we just set).
-		baseHistory := fresh.Status.History
-
-		// Drain a pending-history annotation embedded at resurrection time.
-		if ann, ok := fresh.Annotations[pendingHistoryAnnotation]; ok {
-			var pending []orchestratorv1alpha1.LifecycleEvent
-			if jsonErr := json.Unmarshal([]byte(ann), &pending); jsonErr == nil {
-				baseHistory = pending
-			}
-			// Remove the annotation via a metadata-only patch.
-			metaPatch := client.MergeFrom(fresh.DeepCopy())
-			delete(fresh.Annotations, pendingHistoryAnnotation)
-			if err := r.Patch(ctx, fresh, metaPatch); err != nil {
-				if apierrors.IsConflict(err) {
-					continue // retry: re-Get will drain annotation again
-				}
-				return
-			}
-			// IMPORTANT: r.Patch overwrites fresh with the server response, which
-			// resets fresh.Status.History to the persisted (empty) value.
-			// We deliberately do NOT use fresh.Status.History below; baseHistory
-			// already holds the correct pending history we unmarshalled above.
-		}
-
-		// Build the new history slice and persist it via the Status subresource.
-		newHistory := append(baseHistory, orchestratorv1alpha1.LifecycleEvent{
-			Time:    metav1.Now(),
-			Type:    eventType,
-			Reason:  reason,
-			Message: message,
-		})
-		if len(newHistory) > maxHistoryLen {
-			newHistory = newHistory[len(newHistory)-maxHistoryLen:]
-		}
-
-		// statusPatch is based on fresh (which was updated by the metadata Patch
-		// above, giving us the correct ResourceVersion). We set History explicitly
-		// to newHistory so the MergePatch sends the full array replacement.
-		statusPatch := client.MergeFrom(fresh.DeepCopy())
-		fresh.Status.History = newHistory
-		if err := r.Status().Patch(ctx, fresh, statusPatch); err != nil {
-			if apierrors.IsConflict(err) {
-				continue // retry with fresh Get
-			}
-		}
-		return
+	if r.History != nil {
+		r.History.Append(ctx, agent.Namespace, agent.Name, eventType, reason, message)
 	}
 }
 

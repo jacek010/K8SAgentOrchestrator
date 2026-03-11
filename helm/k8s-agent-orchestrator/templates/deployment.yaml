@@ -46,6 +46,15 @@ spec:
             {{- if .Values.debug }}
             - --debug=true
             {{- end }}
+            {{- if .Values.redis.enabled }}
+            - --redis-addr={{ include "k8s-agent-orchestrator.fullname" . }}-redis-master:6379
+            {{- else if .Values.orchestrator.redisAddr }}
+            - --redis-addr={{ .Values.orchestrator.redisAddr }}
+            {{- end }}
+            - --history-max-entries={{ .Values.orchestrator.historyMaxEntries }}
+            {{- if or (and .Values.redis.enabled .Values.redis.auth.enabled) .Values.orchestrator.redisPassword }}
+            - --redis-password=$(REDIS_PASSWORD)
+            {{- end }}
           env:
             - name: WATCH_NAMESPACE
               value: {{ include "k8s-agent-orchestrator.watchNamespace" . | quote }}
@@ -57,6 +66,16 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            {{- if and .Values.redis.enabled .Values.redis.auth.enabled }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "k8s-agent-orchestrator.fullname" . }}-redis
+                  key: redis-password
+            {{- else if .Values.orchestrator.redisPassword }}
+            - name: REDIS_PASSWORD
+              value: {{ .Values.orchestrator.redisPassword | quote }}
+            {{- end }}
           ports:
             - name: metrics
               containerPort: 8080

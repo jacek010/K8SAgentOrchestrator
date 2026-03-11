@@ -132,9 +132,9 @@ type LifecycleEvent struct {
 type AgentConditionType string
 
 const (
-	AgentConditionReady   AgentConditionType = "Ready"
-	AgentConditionSynced  AgentConditionType = "Synced"
-	AgentConditionFailed  AgentConditionType = "Failed"
+	AgentConditionReady  AgentConditionType = "Ready"
+	AgentConditionSynced AgentConditionType = "Synced"
+	AgentConditionFailed AgentConditionType = "Failed"
 )
 
 // AgentCondition describes the state of an Agent at a certain point.
@@ -188,13 +188,6 @@ type AgentStatus struct {
 	// Populated only when spec.servicePort > 0.
 	// +optional
 	ServiceName string `json:"serviceName,omitempty"`
-
-	// History contains an ordered list of lifecycle events for this Agent (newest last).
-	// Unlike Kubernetes Events, entries survive resurrections because they are stored in
-	// the Agent's status subresource and forwarded to each new CR on self-healing.
-	// Capped at 100 entries; oldest are evicted first.
-	// +optional
-	History []LifecycleEvent `json:"history,omitempty"`
 }
 
 // +kubebuilder:object:root=true

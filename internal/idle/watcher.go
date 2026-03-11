@@ -25,8 +25,8 @@ var log = ctrl.Log.WithName("idle-watcher")
 type Watcher struct {
 	// Client is the controller-runtime client used to list and patch Agent CRs.
 	Client client.Client
-	// Cache is the shared in-memory cache where activity timestamps are stored.
-	Cache *cache.AgentCacheManager
+	// Cache is the shared cache where activity timestamps are stored.
+	Cache cache.CacheStore
 	// GlobalTimeout is the fallback idle timeout applied to every agent that does
 	// not specify spec.idleTimeout. Zero disables idle tracking globally.
 	GlobalTimeout time.Duration
@@ -60,9 +60,10 @@ func (w *Watcher) Start(ctx context.Context) {
 }
 
 // TouchActivity records the current time as the last activity for an agent.
-// Call this whenever an agent-specific REST request is received.
+// The timestamp is stored as Unix nanoseconds (int64) so it round-trips cleanly
+// through JSON when using a Redis-backed CacheStore.
 func (w *Watcher) TouchActivity(namespace, name string) {
-	w.Cache.Set(namespace, name, ActivityKey, time.Now(), 0)
+	w.Cache.Set(namespace, name, ActivityKey, time.Now().UnixNano(), 0)
 }
 
 // check iterates over all Agent CRs and pauses those that exceeded their timeout.
@@ -99,10 +100,19 @@ func (w *Watcher) check(ctx context.Context) {
 			continue
 		}
 
-		lastActivity, ok := val.(time.Time)
-		if !ok {
+		// The value is stored as int64 UnixNano. When read back through a Redis
+		// CacheStore the JSON round-trip yields float64, so handle both.
+		var lastActivityNano int64
+		switch v := val.(type) {
+		case int64:
+			lastActivityNano = v
+		case float64:
+			lastActivityNano = int64(v)
+		default:
+			w.TouchActivity(agent.Namespace, agent.Name)
 			continue
 		}
+		lastActivity := time.Unix(0, lastActivityNano)
 
 		if now.Sub(lastActivity) < timeout {
 			continue // still within timeout window

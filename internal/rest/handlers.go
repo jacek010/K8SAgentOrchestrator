@@ -29,27 +29,13 @@ func ts() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05")
 }
 
-// appendHistory fetches the latest Agent object and appends a LifecycleEvent to
-// its Status.History via a Status subresource patch.  It is intentionally
-// best-effort: errors are silently swallowed so that a history failure never
-// surfaces in the REST response.
+// appendHistory records a lifecycle event via the history store.
+// It is intentionally best-effort: errors are silently swallowed so that a
+// history failure never surfaces in the REST response.
 func (s *Server) appendHistory(ctx context.Context, namespace, name, eventType, reason, message string) {
-	agent := &orchestratorv1alpha1.Agent{}
-	if err := s.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, agent); err != nil {
-		return
+	if s.history != nil {
+		s.history.Append(ctx, namespace, name, eventType, reason, message)
 	}
-	patch := client.MergeFrom(agent.DeepCopy())
-	agent.Status.History = append(agent.Status.History, orchestratorv1alpha1.LifecycleEvent{
-		Time:    metav1.Now(),
-		Type:    eventType,
-		Reason:  reason,
-		Message: message,
-	})
-	const maxHistory = 100
-	if len(agent.Status.History) > maxHistory {
-		agent.Status.History = agent.Status.History[len(agent.Status.History)-maxHistory:]
-	}
-	_ = s.client.Status().Patch(ctx, agent, patch)
 }
 func respondOK(c *gin.Context, data interface{}) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "data": data})
@@ -119,20 +105,20 @@ func (s *Server) handleReadyz(c *gin.Context) {
 
 // CreateAgentRequest is the JSON body for POST /agents.
 type CreateAgentRequest struct {
-	Name            string                        `json:"name" binding:"required"`
-	Image           string                        `json:"image" binding:"required"`
-	ImagePullPolicy string                        `json:"imagePullPolicy,omitempty"`
-	Env             []corev1.EnvVar               `json:"env,omitempty"`
-	EnvFrom         []corev1.EnvFromSource        `json:"envFrom,omitempty"`
-	Resources       corev1.ResourceRequirements   `json:"resources,omitempty"`
-	Command         []string                      `json:"command,omitempty"`
-	Args            []string                      `json:"args,omitempty"`
-	ServiceAccount  string                        `json:"serviceAccountName,omitempty"`
-	RestartPolicy   string                        `json:"restartPolicy,omitempty"`
-	PodLabels       map[string]string             `json:"podLabels,omitempty"`
-	PodAnnotations  map[string]string             `json:"podAnnotations,omitempty"`
-	Labels          map[string]string             `json:"labels,omitempty"`
-	Annotations     map[string]string             `json:"annotations,omitempty"`
+	Name            string                      `json:"name" binding:"required"`
+	Image           string                      `json:"image" binding:"required"`
+	ImagePullPolicy string                      `json:"imagePullPolicy,omitempty"`
+	Env             []corev1.EnvVar             `json:"env,omitempty"`
+	EnvFrom         []corev1.EnvFromSource      `json:"envFrom,omitempty"`
+	Resources       corev1.ResourceRequirements `json:"resources,omitempty"`
+	Command         []string                    `json:"command,omitempty"`
+	Args            []string                    `json:"args,omitempty"`
+	ServiceAccount  string                      `json:"serviceAccountName,omitempty"`
+	RestartPolicy   string                      `json:"restartPolicy,omitempty"`
+	PodLabels       map[string]string           `json:"podLabels,omitempty"`
+	PodAnnotations  map[string]string           `json:"podAnnotations,omitempty"`
+	Labels          map[string]string           `json:"labels,omitempty"`
+	Annotations     map[string]string           `json:"annotations,omitempty"`
 	// SelfHealingDisabled disables automatic resurrection of this Agent CR when deleted externally.
 	// Default false means self-healing is ON.
 	SelfHealingDisabled bool `json:"selfHealingDisabled,omitempty"`
@@ -179,17 +165,17 @@ func (s *Server) handleCreateAgent(c *gin.Context) {
 			Annotations: req.Annotations,
 		},
 		Spec: orchestratorv1alpha1.AgentSpec{
-			Image:              req.Image,
-			ImagePullPolicy:    pullPolicy,
-			Env:                req.Env,
-			EnvFrom:            req.EnvFrom,
-			Resources:          req.Resources,
-			Command:            req.Command,
-			Args:               req.Args,
-			ServiceAccountName: req.ServiceAccount,
-			RestartPolicy:      restartPolicy,
-			PodLabels:          req.PodLabels,
-			PodAnnotations:     req.PodAnnotations,
+			Image:               req.Image,
+			ImagePullPolicy:     pullPolicy,
+			Env:                 req.Env,
+			EnvFrom:             req.EnvFrom,
+			Resources:           req.Resources,
+			Command:             req.Command,
+			Args:                req.Args,
+			ServiceAccountName:  req.ServiceAccount,
+			RestartPolicy:       restartPolicy,
+			PodLabels:           req.PodLabels,
+			PodAnnotations:      req.PodAnnotations,
 			SelfHealingDisabled: req.SelfHealingDisabled,
 			Paused:              req.Paused,
 			ServicePort:         req.ServicePort,
@@ -330,6 +316,7 @@ func (s *Server) handleGetAgentHistory(c *gin.Context) {
 	ctx, cancel := apiCtx()
 	defer cancel()
 
+	// Verify the agent exists before returning history (proper 404 semantics).
 	agent := &orchestratorv1alpha1.Agent{}
 	if err := s.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, agent); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -340,7 +327,10 @@ func (s *Server) handleGetAgentHistory(c *gin.Context) {
 		return
 	}
 
-	history := agent.Status.History
+	var history []orchestratorv1alpha1.LifecycleEvent
+	if s.history != nil {
+		history = s.history.List(ctx, namespace, name)
+	}
 	if history == nil {
 		history = []orchestratorv1alpha1.LifecycleEvent{}
 	}

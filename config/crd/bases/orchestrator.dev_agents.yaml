@@ -2241,40 +2241,6 @@ spec:
                   - type
                   type: object
                 type: array
-              history:
-                description: |-
-                  History contains an ordered list of lifecycle events for this Agent (newest last).
-                  Unlike Kubernetes Events, entries survive resurrections because they are stored in
-                  the Agent's status subresource and forwarded to each new CR on self-healing.
-                  Capped at 100 entries; oldest are evicted first.
-                items:
-                  description: |-
-                    LifecycleEvent records a single lifecycle operation on this Agent.
-                    Entries are stored in Status.History and intentionally forwarded to each new CR
-                    created by the self-healing mechanism, giving kubectl describe a full audit
-                    trail that survives entity-UID churn from resurrections.
-                  properties:
-                    message:
-                      description: Message is a human-readable description.
-                      type: string
-                    reason:
-                      description: Reason is a short CamelCase identifier (e.g. Resurrected,
-                        Stopped, EnvMerged).
-                      type: string
-                    time:
-                      description: Time when the event occurred.
-                      format: date-time
-                      type: string
-                    type:
-                      description: Type is "Normal" or "Warning".
-                      type: string
-                  required:
-                  - message
-                  - reason
-                  - time
-                  - type
-                  type: object
-                type: array
               lastUpdated:
                 description: LastUpdated is the time of the last status update.
                 format: date-time
