@@ -4,6 +4,36 @@ A Kubernetes operator written in **Go** that manages **Agent** custom resources 
 
 ---
 
+## Table of Contents
+
+- [Architecture](#architecture)
+  - [Agent lifecycle phases](#agent-lifecycle-phases)
+- [Prerequisites](#prerequisites)
+- [Running locally](#running-locally)
+- [Web UI](#web-ui)
+  - [Features](#features)
+  - [CLI flag](#cli-flag)
+- [Deploying with Helm (production)](#deploying-with-helm-production)
+- [REST API Reference](#rest-api-reference)
+  - [Namespace in URLs](#namespace-in-urls)
+  - [Health](#health)
+  - [Agents — CRUD](#agents--crud)
+  - [Lifecycle control](#lifecycle-control)
+  - [Idle Auto-Stop & Keepalive](#idle-auto-stop--keepalive)
+  - [Self-healing](#self-healing)
+  - [Environment variables](#environment-variables)
+  - [Connectivity — Services](#connectivity--services)
+  - [Lifecycle History](#lifecycle-history)
+  - [Logs](#logs)
+  - [In-memory Cache](#in-memory-cache)
+- [Agent CR — direct kubectl usage](#agent-cr--direct-kubectl-usage)
+- [Makefile targets](#makefile-targets)
+- [Security](#security)
+- [Project structure](#project-structure)
+- [TODO](#todo)
+
+---
+
 ## Architecture
 
 ```
@@ -749,3 +779,19 @@ K8SAgentOrchestrator/
 ├── Makefile
 └── go.mod
 ```
+
+---
+
+## TODO
+
+- [ ] **Persistent cache** — replace the in-process key-value store with a backend (e.g. Redis or etcd) so cache survives orchestrator restarts
+- [ ] **Multi-namespace watch** — support watching all namespaces via `--watch-all-namespaces` flag instead of a single namespace
+- [ ] **Leader election** — enable and test HA mode with multiple orchestrator replicas and proper leader election
+- [ ] **Agent scaling** — allow `spec.replicas > 1` so a single Agent CR can back multiple Pods behind the ClusterIP Service
+- [ ] **Webhook validation** — add a validating/mutating webhook to reject invalid Agent specs at creation time
+- [ ] **gRPC / WebSocket logs** — replace chunked HTTP log streaming with a proper WebSocket or gRPC stream endpoint
+- [ ] **Auth on REST API** — add token-based (Bearer) or mTLS authentication to the REST API
+- [ ] **Persistent lifecycle history** — store history in a ConfigMap or external DB so it survives CRD deletion and cluster rebuilds
+- [ ] **Grafana dashboard** — ship a pre-built Grafana dashboard JSON for the Prometheus metrics exposed on `:8080`
+- [ ] **CLI client** — implement a `kubectl`-style CLI (`orchctl`) wrapping the REST API for scripting and CI usage
+- [ ] **E2E test suite** — add end-to-end tests using `envtest` or a real `kind` cluster in CI
