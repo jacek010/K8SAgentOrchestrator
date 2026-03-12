@@ -1,5 +1,5 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /workspace
 
@@ -11,6 +11,7 @@ RUN go mod download
 COPY cmd/        cmd/
 COPY api/        api/
 COPY internal/   internal/
+COPY docs/       docs/
 
 # Build a statically linked binary
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
