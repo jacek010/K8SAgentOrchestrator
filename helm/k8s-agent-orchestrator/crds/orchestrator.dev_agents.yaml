@@ -219,6 +219,24 @@ spec:
                 selfHealingDisabled:
                   description: SelfHealingDisabled, when true, turns off automatic resurrection of this Agent CR. Default false means self-healing is ON.
                   type: boolean
+                idleTimeout:
+                  description: IdleTimeout is the number of seconds of inactivity after which the orchestrator automatically pauses this agent. 0 disables idle tracking.
+                  type: integer
+                  format: int32
+                  minimum: 0
+                servicePort:
+                  description: ServicePort, when greater than 0, causes the controller to create a ClusterIP Service on that port.
+                  type: integer
+                  format: int32
+                  minimum: 1
+                  maximum: 65535
+                serviceProtocol:
+                  description: ServiceProtocol is the network protocol for the Service port. Defaults to TCP.
+                  type: string
+                  enum:
+                    - TCP
+                    - UDP
+                    - SCTP
             status:
               description: AgentStatus defines the observed state of an Agent.
               type: object
@@ -269,4 +287,7 @@ spec:
                   format: date-time
                 restoredFrom:
                   description: RestoredFrom is the original Agent name that was deleted and triggered this resurrection.
+                  type: string
+                serviceName:
+                  description: ServiceName is the name of the ClusterIP Service created for this agent. Populated only when spec.servicePort > 0.
                   type: string

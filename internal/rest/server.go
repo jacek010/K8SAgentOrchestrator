@@ -83,6 +83,9 @@ func (s *Server) registerRoutes() {
 
 	v1 := s.engine.Group("/api/v1")
 	{
+		// Info (namespace, version)
+		v1.GET("/info", s.handleInfo)
+
 		// Health & readiness
 		s.engine.GET("/healthz", s.handleHealthz)
 		s.engine.GET("/readyz", s.handleReadyz)

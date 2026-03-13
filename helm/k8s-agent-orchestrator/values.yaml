@@ -5,11 +5,11 @@ replicaCount: 1
 
 image:
   # -- Container image repository.
-  repository: ghcr.io/jacekmyjkowski/k8s-agent-orchestrator
+  repository: aiworkbenchglobalacr.azurecr.io/k8s-agent-orchestrator
   # -- Image pull policy.
   pullPolicy: IfNotPresent
   # -- Image tag. Defaults to Chart appVersion.
-  tag: ""
+  tag: "0.1.1-dev6"
 
 # -- Image pull secrets.
 imagePullSecrets: []
@@ -61,6 +61,8 @@ service:
   restPort: 8082
   # -- Metrics port.
   metricsPort: 8080
+  # -- UI port.
+  uiPort: 8083
 
 # -- Resource limits and requests for the orchestrator container.
 resources:

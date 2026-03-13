@@ -70,6 +70,17 @@ func (s *Server) rawClientset() (kubernetes.Interface, error) {
 
 // ─────────────────────────────── health ──────────────────────────────────────
 
+// handleInfo godoc
+// @Summary      Server info
+// @Description  Returns the configured default namespace and other server metadata
+// @Tags         health
+// @Produce      json
+// @Success      200  {object}  map[string]string
+// @Router       /api/v1/info [get]
+func (s *Server) handleInfo(c *gin.Context) {
+	respondOK(c, gin.H{"namespace": s.namespace})
+}
+
 // handleHealthz godoc
 // @Summary      Liveness probe
 // @Description  Returns 200 OK if the process is alive
@@ -131,6 +142,24 @@ type CreateAgentRequest struct {
 	// IdleTimeout is the number of seconds of inactivity after which the orchestrator
 	// automatically pauses this agent. 0 disables idle tracking (uses global default).
 	IdleTimeout int32 `json:"idleTimeout,omitempty"`
+}
+
+// UpdateAgentRequest is the JSON body for PUT /agents/:name.
+// All fields are optional — only non-zero / non-nil values are applied.
+type UpdateAgentRequest struct {
+	Image           string                      `json:"image,omitempty"`
+	ImagePullPolicy string                      `json:"imagePullPolicy,omitempty"`
+	Env             []corev1.EnvVar             `json:"env,omitempty"`
+	EnvFrom         []corev1.EnvFromSource      `json:"envFrom,omitempty"`
+	Resources       corev1.ResourceRequirements `json:"resources,omitempty"`
+	Command         []string                    `json:"command,omitempty"`
+	Args            []string                    `json:"args,omitempty"`
+	ServiceAccount  string                      `json:"serviceAccountName,omitempty"`
+	RestartPolicy   string                      `json:"restartPolicy,omitempty"`
+	PodLabels       map[string]string           `json:"podLabels,omitempty"`
+	PodAnnotations  map[string]string           `json:"podAnnotations,omitempty"`
+	// IdleTimeout pointer: nil = not provided, 0 = disable idle tracking.
+	IdleTimeout *int32 `json:"idleTimeout,omitempty"`
 }
 
 // handleCreateAgent godoc
@@ -348,7 +377,7 @@ func (s *Server) handleGetAgentHistory(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        name       path      string              true  "Agent name"
-// @Param        body       body      CreateAgentRequest  true  "Fields to update"
+// @Param        body       body      UpdateAgentRequest  true  "Fields to update"
 // @Success      200        {object}  map[string]interface{}
 // @Failure      400        {object}  map[string]string
 // @Failure      404        {object}  map[string]string
@@ -359,7 +388,7 @@ func (s *Server) handleUpdateAgent(c *gin.Context) {
 	ctx, cancel := apiCtx()
 	defer cancel()
 
-	var req CreateAgentRequest
+	var req UpdateAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
@@ -406,8 +435,8 @@ func (s *Server) handleUpdateAgent(c *gin.Context) {
 	if req.PodAnnotations != nil {
 		agent.Spec.PodAnnotations = req.PodAnnotations
 	}
-	if req.IdleTimeout >= 0 && req.IdleTimeout != agent.Spec.IdleTimeout {
-		agent.Spec.IdleTimeout = req.IdleTimeout
+	if req.IdleTimeout != nil {
+		agent.Spec.IdleTimeout = *req.IdleTimeout
 	}
 
 	if err := s.client.Update(ctx, agent); err != nil {

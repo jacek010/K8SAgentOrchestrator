@@ -11,10 +11,14 @@ spec:
     {{- include "k8s-agent-orchestrator.selectorLabels" . | nindent 4 }}
   ports:
     - name: rest-api
-      port: {{ .Values.service.restPort }}
+      port: {{ .Values.service.restPort | default 8082 }}
       targetPort: rest-api
       protocol: TCP
     - name: metrics
-      port: {{ .Values.service.metricsPort }}
+      port: {{ .Values.service.metricsPort | default 8080 }}
       targetPort: metrics
       protocol: TCP
+    - name: ui
+      port: {{ .Values.service.uiPort | default 8083 }}
+      targetPort: ui
+      protocol: TCP 

@@ -514,9 +514,21 @@ let refreshTimer = null;
 
 // ── Bootstrap ───────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  fetchInfo();
   loadAgents();
   refreshTimer = setInterval(loadAgents, 5000);
 });
+
+async function fetchInfo() {
+  try {
+    const info = await api('/info');
+    if (info?.namespace) {
+      document.getElementById('ns-badge').textContent = info.namespace;
+    }
+  } catch(e) {
+    // silent — badge stays as-is
+  }
+}
 
 // ── API helpers ─────────────────────────────────────────────────────────
 async function api(path, opts = {}) {
@@ -789,6 +801,7 @@ function renderOverview(a) {
     <button class="btn btn-ghost" onclick="agentAction('restart','${name}')" ${stopped?'disabled':''}>↺ Restart</button>
     <button class="btn btn-ghost" onclick="agentAction('disable-healing','${name}')" ${a.spec?.selfHealingDisabled?'disabled':''}>🛡 Disable healing</button>
     <button class="btn btn-ghost" onclick="agentAction('enable-healing','${name}')" ${!a.spec?.selfHealingDisabled?'disabled':''}>🛡 Enable healing</button>
+    <button class="btn btn-ghost" onclick="openSetIdleTimeout('${name}', ${idle})">⏱ Set Idle Timeout</button>
     <button class="btn btn-danger" onclick="closeModal('detail-modal');confirmDelete('${name}')">✕ Delete</button>
   `;
 }
@@ -837,6 +850,22 @@ async function doKeepalive() {
   } finally {
     btn.disabled = false;
     btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Send Keepalive`;
+  }
+}
+
+// ── Set Idle Timeout ──────────────────────────────────────────────────────
+async function openSetIdleTimeout(name, current) {
+  const val = window.prompt(`Set idle timeout for "${name}" (seconds, 0 = disabled):`, current);
+  if (val === null) return; // cancelled
+  const secs = parseInt(val);
+  if (isNaN(secs) || secs < 0) { toast('Invalid value — enter a non-negative integer', 'err'); return; }
+  try {
+    await api(`/agents/${name}`, { method: 'PUT', body: JSON.stringify({ idleTimeout: secs }) });
+    toast(`Idle timeout set to ${secs === 0 ? 'disabled' : secs + 's'}`, 'ok');
+    loadAgents();
+    if (currentAgent?.metadata?.name === name) refreshDetail(name);
+  } catch(e) {
+    toast(e.message, 'err');
   }
 }
 

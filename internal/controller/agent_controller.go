@@ -455,7 +455,8 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // reconcileService ensures a ClusterIP Service exists (or is deleted) for the Agent,
 // depending on whether spec.servicePort is set.
 func (r *AgentReconciler) reconcileService(ctx context.Context, agent *orchestratorv1alpha1.Agent) error {
-	svcKey := types.NamespacedName{Namespace: agent.Namespace, Name: agent.Name}
+	svcName := serviceNameFor(agent.Name)
+	svcKey := types.NamespacedName{Namespace: agent.Namespace, Name: svcName}
 	existing := &corev1.Service{}
 	getErr := r.Get(ctx, svcKey, existing)
 
@@ -488,7 +489,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *orchestra
 		// Create the Service.
 		svc := &corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      agent.Name,
+				Name:      svcName,
 				Namespace: agent.Namespace,
 				Labels: map[string]string{
 					managedByLabel: managedByValue,
@@ -511,7 +512,7 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *orchestra
 			return fmt.Errorf("creating agent service: %w", err)
 		}
 		patch := client.MergeFrom(agent.DeepCopy())
-		agent.Status.ServiceName = agent.Name
+		agent.Status.ServiceName = svcName
 		_ = r.Status().Patch(ctx, agent, patch)
 		return nil
 	}
@@ -531,12 +532,21 @@ func (r *AgentReconciler) reconcileService(ctx context.Context, agent *orchestra
 	}
 
 	// Ensure status is in sync.
-	if agent.Status.ServiceName != agent.Name {
+	if agent.Status.ServiceName != svcName {
 		patch := client.MergeFrom(agent.DeepCopy())
-		agent.Status.ServiceName = agent.Name
+		agent.Status.ServiceName = svcName
 		_ = r.Status().Patch(ctx, agent, patch)
 	}
 	return nil
+}
+
+// serviceNameFor returns a DNS-1035-compliant Service name for the given agent name.
+// Services must start with a letter; if the agent name starts with a digit, "agt-" is prepended.
+func serviceNameFor(agentName string) string {
+	if len(agentName) > 0 && agentName[0] >= '0' && agentName[0] <= '9' {
+		return "agt-" + agentName
+	}
+	return agentName
 }
 
 // GetPodForAgent returns the current Pod name for a given Agent (used by REST API).

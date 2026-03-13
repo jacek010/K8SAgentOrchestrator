@@ -23,11 +23,12 @@ rules:
       - patch
       - delete
 
-  # ── Manage Pods (agent workloads) ─────────────────────────────────────────
+  # ── Manage Pods and Services (agent workloads) ──────────────────────────────
   - apiGroups:
       - ""
     resources:
       - pods
+      - services
     verbs:
       - get
       - list
