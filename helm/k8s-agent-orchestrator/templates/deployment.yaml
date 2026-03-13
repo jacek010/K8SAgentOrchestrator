@@ -86,6 +86,9 @@ spec:
             - name: rest-api
               containerPort: 8082
               protocol: TCP
+            - name: ui
+              containerPort: 8083
+              protocol: TCP
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
