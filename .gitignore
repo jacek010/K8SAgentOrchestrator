@@ -63,3 +63,5 @@ coverage.html
 
 
 *.lock
+
+.private/
